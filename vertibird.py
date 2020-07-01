@@ -525,40 +525,67 @@ class Vertibird(object):
 def session_generator(*args, **kwargs):
     return (lambda: Vertibird(*args, **kwargs))
         
+class VertibirdSpawner(object):
+    def __init__(self, *args, **kwargs):
+        self.vargs = args
+        self.vkwargs = kwargs
+    
+    def vsession(self, func):
+        def wrapper(*args, **kwargs):
+            kwargs['vertibird'] = session_generator(
+                *self.vargs,
+                **self.vkwargs
+            )()
+            
+            return func(*args, **kwargs)
+            
+        return wrapper
+        
 if __name__ == '__main__':
     import cv2
     import numpy as np
     
-    x = session_generator()()
+    vspawner = VertibirdSpawner()
     
-    y = x.get('019d372a-8331-489e-bc9a-8186e89e1ece')
-    
-    try:
-        y.attach_cdrom(
-            '/home/naphtha/Downloads/ubuntu-20.04-desktop-amd64.iso'
-        )
-        y.create_or_attach_drive('./drives/test.img', 25769803776, 'virtio')
-        options = y.get_properties()
-        options['memory'] = 2147483648
-        options['cores'] = 4
-        y.set_properties(options)
+    @vspawner.vsession
+    def main(vertibird):
+        x = vertibird
         
-        y.start()
-    except:
-        pass
-    
-    imgGet = (lambda: cv2.cvtColor(np.asarray(
-        y.display.capture().convert('RGB')
-    ), cv2.COLOR_RGB2BGR))
-    
-    while y.state() == 'online':
-        z = imgGet()
+        y = x.get('019d372a-8331-489e-bc9a-8186e89e1ece')
+        
+        try:
+            y.attach_cdrom(
+                '/home/naphtha/Downloads/ubuntu-20.04-desktop-amd64.iso'
+            )
+            y.create_or_attach_drive(
+                './drives/test.img',
+                25769803776,
+                'virtio'
+            )
             
-        cv2.imshow('image', z)
-        cv2.waitKey(34)
+            options = y.get_properties()
+            options['memory'] = 2147483648
+            options['cores'] = 4
+            y.set_properties(options)
+            
+            y.start()
+        except:
+            pass
         
-        #i = (lambda i: 'None' if bool(i) == False else i)(input('>>> '))
-        #print(eval(i))
-    
-    if y.state() == 'online':
-        y.stop()
+        imgGet = (lambda: cv2.cvtColor(np.asarray(
+            y.display.capture().convert('RGB')
+        ), cv2.COLOR_RGB2BGR))
+        
+        while y.state() == 'online':
+            z = imgGet()
+                
+            cv2.imshow('image', z)
+            cv2.waitKey(34)
+            
+            #i = (lambda i: 'None' if bool(i) == False else i)(input('>>> '))
+            #print(eval(i))
+        
+        if y.state() == 'online':
+            y.stop()
+            
+    main()
