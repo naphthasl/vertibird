@@ -324,7 +324,25 @@ class Vertibird(object):
                     '-device',
                     'lsi53c895a,id=scsi0',
                     '-device',
-                    'ahci,id=ahci'
+                    'ahci,id=ahci',
+                    '-soundhw',
+                    'ac97',
+                    '-device',
+                    'rtl8139,netdev=net0',
+                    '-netdev',
+                    'user,id=net0{0}{1}'.format(
+                        (lambda x: ',' if x > 0 else '')(
+                            len(self.db_object.forwarding)
+                        ),
+                        ','.join([
+                            'hostfwd={0}:{1}:{2}-:{3}'.format(
+                                x['protocol'],
+                                x['external_ip'],
+                                x['external_port'],
+                                x['internal_port']
+                            ) for x in self.db_object.forwarding
+                        ])
+                    )
                 ]
                 
                 for cdrom in self.db_object.cdroms:
@@ -649,6 +667,7 @@ class Vertibird(object):
         vga        = Column(String, default = 'std')
         cdroms     = Column(PickleType, default = [])
         drives     = Column(PickleType, default = [])
+        forwarding = Column(PickleType, default = [])
     
     def __find_free_port(self):
         with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
