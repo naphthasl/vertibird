@@ -32,6 +32,7 @@ VNC_TIMEOUT_SECS = TELNET_TIMEOUT_SECS
 STATE_CHECK_CLK_SECS = 0.05
 DEFAULT_DSIZE = 8589934592
 VNC_IMAGE_MODE = 'RGB'
+DISK_FORMAT = 'raw'
 
 class Vertibird(object):
     class IncompatibleOperatingSystem(Exception):
@@ -363,9 +364,12 @@ class Vertibird(object):
                         if drive['type'] == 'ide':
                             arguments += [
                                 '-drive',
-                                'id={0},file={1},if=none,format=raw'.format(
+                                'id={0},file={1},if=none,format={2}'.format(
                                     internal_id,
-                                    shlex.quote(os.path.abspath(drive['path']))
+                                    shlex.quote(
+                                        os.path.abspath(drive['path'])
+                                    ),
+                                    DISK_FORMAT
                                 ),
                                 '-device',
                                 'ide-hd,drive={0},bus=ahci.{1}'.format(
@@ -376,9 +380,12 @@ class Vertibird(object):
                         elif drive['type'] == 'scsi':
                             arguments += [
                                 '-drive',
-                                'id={0},file={1},if=none,format=raw'.format(
+                                'id={0},file={1},if=none,format={2}'.format(
                                     internal_id,
-                                    shlex.quote(os.path.abspath(drive['path']))
+                                    shlex.quote(
+                                        os.path.abspath(drive['path'])
+                                    ),
+                                    DISK_FORMAT
                                 ),
                                 '-device',
                                 'scsi-hd,drive={0},bus=scsi0.{1}'.format(
@@ -389,9 +396,12 @@ class Vertibird(object):
                         elif drive['type'] == 'virtio':
                             arguments += [
                                 '-drive',
-                                'id={0},file={1},if=virtio,format=raw'.format(
+                                'id={0},file={1},if=virtio,format={2}'.format(
                                     internal_id,
-                                    shlex.quote(os.path.abspath(drive['path']))
+                                    shlex.quote(
+                                        os.path.abspath(drive['path'])
+                                    ),
+                                    DISK_FORMAT
                                 )
                             ]
                     else:
