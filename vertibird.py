@@ -522,11 +522,14 @@ class Vertibird(object):
             'monitor': self.__find_free_port()
         }
         
+def session_generator(*args, **kwargs):
+    return (lambda: Vertibird(*args, **kwargs))
+        
 if __name__ == '__main__':
     import cv2
     import numpy as np
     
-    x = Vertibird()
+    x = session_generator()()
     
     y = x.get('019d372a-8331-489e-bc9a-8186e89e1ece')
     
