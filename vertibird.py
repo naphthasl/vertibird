@@ -336,10 +336,10 @@ class Vertibird(object):
                         ),
                         ','.join([
                             'hostfwd={0}:{1}:{2}-:{3}'.format(
-                                x['protocol'],
-                                x['external_ip'],
-                                x['external_port'],
-                                x['internal_port']
+                                shlex.quote(x['protocol']),
+                                shlex.quote(x['external_ip']),
+                                shlex.quote(x['external_port']),
+                                shlex.quote(x['internal_port'])
                             ) for x in self.db_object.forwarding
                         ])
                     )
@@ -436,6 +436,65 @@ class Vertibird(object):
             self.db_object.vga       = str(properties['vga'    ])
             self.db_session.commit()
         
+        def forward_port(self,
+                external_port,
+                internal_port,
+                protocol: str = 'tcp',
+                external_ip: str = '0.0.0.0'
+            ) -> str:
+            """
+            Forwards a port from within the VM to a port outside of it.
+            Returns the forwarding ID.
+            """
+            
+            self.__set_option_offline()
+            
+            fwd_id = str(hash('-'.join([
+                protocol,
+                external_ip,
+                str(external_port),
+                str(internal_port)
+            ])))
+            
+            if not (fwd_id in list(map(
+                    (lambda x: x['id']),
+                    self.db_object.forwarding
+                ))):
+                    
+                self.db_object.forwarding = (self.db_object.forwarding + [
+                    {
+                        'id': fwd_id,
+                        'protocol': protocol,
+                        'external_ip': external_ip,
+                        'external_port': str(external_port),
+                        'internal_port': str(internal_port)
+                    },
+                ])
+                self.db_session.commit()
+            
+            return fwd_id
+            
+        def list_forwardings(self):
+            """
+            Returns a list containing dictionaries, all of which are different
+            port forwards specified for this VM.
+            """
+            
+            return self.db_object.forwarding
+            
+        def remove_forwarding(self, fwd_id: str):
+            """
+            Remove a port forward based on forward ID.
+            """
+            
+            self.__set_option_offline()
+            
+            self.db_object.forwarding = list(filter(
+                lambda x: x['id'] != fwd_id,
+                self.db_object.forwarding
+            ))
+            self.db_session.commit()
+        
         def attach_cdrom(self, iso: str):
             """
             Attaches a path to a CD-ROM iso to the virtual machine.
@@ -467,10 +526,10 @@ class Vertibird(object):
             self.__set_option_offline()
             
             if (iso in self.db_object.cdroms):
-                self.db_object.cdroms = filter(
+                self.db_object.cdroms = list(filter(
                     lambda x: x != iso,
                     self.db_object.cdroms
-                )
+                ))
                 self.db_session.commit()
                 
         def attach_drive(self, img: str, dtype: str = 'ide'):
@@ -522,10 +581,10 @@ class Vertibird(object):
             
             self.__set_option_offline()
             
-            self.db_object.drives = filter(
+            self.db_object.drives = list(filter(
                 lambda x: x['path'] != img,
                 self.db_object.drives
-            )
+            ))
             self.db_session.commit()
             
         def create_or_attach_drive(
@@ -735,6 +794,10 @@ if __name__ == '__main__':
                 './drives/test.img',
                 25769803776,
                 'virtio'
+            )
+            y.forward_port(
+                9001,
+                22
             )
             
             options = y.get_properties()
