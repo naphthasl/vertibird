@@ -51,12 +51,15 @@ class Vertibird(object):
         ----------
         qemu :
             The QEMU executable to use, defaults to qemu-kvm
-        persistence:
+        persistence :
             The shelf/database to store information about created VMs in,
             defaults to sqlite:///vertibird.db
         
         Raises
         ------
+        Vertibird.IncompatibleOperatingSystem
+            Raised when your OS doesn't support the stuff Vertibird needs to
+            work.
         """
         
         # Not sure if this is a good idea
@@ -72,6 +75,10 @@ class Vertibird(object):
             self.get(x)._state_check()
     
     def create(self):
+        """
+        Creates a virtual machine with a random UUID and returns the live
+        access object.
+        """
         x = self.VertiVM(id = str(uuid.uuid4()), ports = self._new_ports())
         self.db.add(x)
         self.db.commit()
@@ -79,14 +86,28 @@ class Vertibird(object):
         return self.__wrap_live(x)
         
     def get(self, vmuuid = str):
+        """
+        Retrieves a Vertibird.VertiVMLive object via the given UUID.
+        """
         return self.__wrap_live(self.db.query(self.VertiVM).filter(
             self.VertiVM.id == vmuuid
         ).one())
     
     def remove(self, vmuuid = str):
+        """
+        Removes a virtual machine of given UUID.
+        """
         self.get(vmuuid).remove()
         
     def create_drive(self, img: str, size: int = DEFAULT_DSIZE):
+        """
+        Creates a virtual machine drive at the specified path and of the
+        specified size. Size is in bytes and defaults to DEFAULT_DSIZE.
+        
+        Virtual machine drives are created as sparse files, so ensure that your
+        filesystem supports them - it's an exceedingly useful feature, and
+        contributes to the performance of Vertibird significantly!
+        """
         if not os.path.isfile(img):
             f = open(img, 'wb')
             f.truncate(size)
@@ -95,6 +116,10 @@ class Vertibird(object):
             raise self.DriveAlreadyExists(img)
         
     def list(self):
+        """
+        Returns a list of all the available virtual machine UUIDs.
+        """
+        
         return list(
             map(
                 (lambda x: x[0]),
@@ -136,6 +161,20 @@ class Vertibird(object):
                 self.client = None
             
             def capture(self):
+                """
+                Returns a PIL image of the virtual machine display. You can
+                also interact with the VM through the following functions:
+                    - paste()
+                    - mouseMove()
+                    - mouseDown()
+                    - mouseUp()
+                    - keyDown()
+                    - keyUp()
+                For an explanation of how they work, see the following...
+                    - https://vncdotool.readthedocs.io/en/latest/modules.html
+                    - https://vncdotool.readthedocs.io/en/latest/library.html
+                """
+                
                 try:
                     self.client.refreshScreen()
                 except (TimeoutError, AttributeError):
@@ -201,6 +240,11 @@ class Vertibird(object):
                 self.connect()
                         
         def __init__(self, vertibird, db_session, db_object):
+            """
+            Don't call this directly, but know that it assigns the VMDisplay
+            object to self.display. This will allow you to interact with the VM
+            """
+            
             self.vertibird  = vertibird
             self.db_session = db_session
             self.db_object  = db_object
@@ -212,6 +256,12 @@ class Vertibird(object):
             self._state_check()
             
         def remove(self):
+            """
+            Removes the virtual machine from the database. Will NOT delete
+            the storage or mounted ISOs. It is recommended to call
+            Vertibird.remove() instead.
+            """
+            
             try:
                 self.stop()
             except self.InvalidStateChange:
@@ -221,6 +271,11 @@ class Vertibird(object):
             self.db_session.commit()
             
         def start(self):
+            """
+            Starts the virtual machine's QEMU process. Will raise an exception
+            if the virtual machine is already running.
+            """
+            
             if self.state() == 'offline':
                 self.__randomize_ports()
                 
@@ -327,6 +382,11 @@ class Vertibird(object):
                 raise self.InvalidStateChange('Invalid state for start()!')
         
         def get_properties(self):
+            """
+            Returns a dictionary containing the properties for the virtual
+            machine, such as the memory, core count, CPU model, machine model
+            and graphics adapter model.
+            """
             return {
                 'memory'    : self.db_object.memory  ,
                 'cores'     : self.db_object.cores   ,
@@ -336,6 +396,10 @@ class Vertibird(object):
             }
         
         def set_properties(self, properties: dict):
+            """
+            Replaces all of the virtual machine options with the contents of a
+            property dictionary, of which can be obtained with get_properties()
+            """
             self.__set_option_offline()
             
             self.db_object.memory    = int(properties['memory' ])
@@ -346,6 +410,10 @@ class Vertibird(object):
             self.db_session.commit()
         
         def attach_cdrom(self, iso: str):
+            """
+            Attaches a path to a CD-ROM iso to the virtual machine.
+            """
+            
             self.__set_option_offline()
             
             if not os.path.isfile(iso):
@@ -357,9 +425,18 @@ class Vertibird(object):
                 self.db_session.commit()
                 
         def list_cdroms(self):
+            """
+            Returns a list containing strings, all of which are paths to the
+            ISOs attached to the VM as CD-ROM drives.
+            """
+            
             return self.db_object.cdroms
             
         def detach_cdrom(self, iso: str):
+            """
+            Detaches a given CD-ROM iso path from the virtual machine.
+            """
+            
             self.__set_option_offline()
             
             if (iso in self.db_object.cdroms):
@@ -370,8 +447,21 @@ class Vertibird(object):
                 self.db_session.commit()
                 
         def attach_drive(self, img: str, dtype: str = 'ide'):
+            """
+            Attaches a drive to the virtual machine.
+            
+            Parameters
+            ----------
+            img :
+                The relative OR absolute path of the image. This will be used
+                to identify the image.
+            dtype :
+                The interface type for the drive. Can be IDE, SCSI or VirtIO.
+            """
+            
             self.__set_option_offline()
             
+            dtype = dtype.lower()
             if not (dtype in ['ide', 'scsi', 'virtio']):
                 raise self.InvalidDriveType('No such type {0}.'.format(dtype))
                 
@@ -391,9 +481,18 @@ class Vertibird(object):
                 self.db_session.commit()
             
         def list_drives(self):
+            """
+            Returns a list of dictionaries specifying the path and interface
+            type of each drive attached to the virtual machine.
+            """
+            
             return self.db_object.drives
             
         def detach_drive(self, img: str):
+            """
+            Detaches a given drive path from the VM.
+            """
+            
             self.__set_option_offline()
             
             self.db_object.drives = filter(
@@ -405,6 +504,12 @@ class Vertibird(object):
         def create_or_attach_drive(
                 self, img: str, size: int = DEFAULT_DSIZE, dtype: str = 'ide'
             ):
+            """
+            Create a drive image if it doesn't exist and attach it if it isn't
+            already attached. See Vertibird.create_drive() and
+            Vertibird.VertiVMLive.attach_drive() for argument explanations.
+            """
+                
             self.__set_option_offline()
             
             if not os.path.isfile(img):
@@ -413,18 +518,30 @@ class Vertibird(object):
                 self.attach_drive(img, dtype)
         
         def signal_shutdown(self):
+            """
+            Sends the shutdown signal. This is non-blocking.
+            """
+            
             if self.state() != 'offline':
                 self.__send_monitor_command('system_powerdown')
             else:
                 raise self.InvalidStateChange('Invalid state for powerdown!')
             
         def signal_reset(self):
+            """
+            Sends the reset signal. This is non-blocking.
+            """
+            
             if self.state() != 'offline':
                 self.__send_monitor_command('system_reset')
             else:
                 raise self.InvalidStateChange('Invalid state for reset!')
             
         def stop(self):
+            """
+            Terminates the virtual machine.
+            """
+            
             if self.state() != 'offline':
                 try:
                     self.__send_monitor_command('quit')
@@ -440,7 +557,16 @@ class Vertibird(object):
             else:
                 raise self.InvalidStateChange('Invalid state for stop()!')
             
-        def state(self):
+        def state(self) -> str:
+            """
+            Return the current state of this virtual machine.
+            
+            Returns
+            -------
+            state :
+                The current VM state, can be "offline" or "online"
+            """
+            
             self._state_check()
             
             return self.db_object.state
@@ -496,6 +622,11 @@ class Vertibird(object):
                 raise self.InvalidStateChange('Must be offline to set options')
     
     class VertiVM(Base):
+        """
+        Internal database class, allows for the definition of virtual machines
+        via SQLAlchemy.
+        """
+        
         __tablename__ = 'machines'
         
         id         = Column(String, primary_key=True)
@@ -527,10 +658,22 @@ def session_generator(*args, **kwargs):
         
 class VertibirdSpawner(object):
     def __init__(self, *args, **kwargs):
+        """
+        Takes exactly the same arguments as Vertibird(), except it creates a
+        decorator that automatically spawns Vertibird sessions for you.
+        """
+        
         self.vargs = args
         self.vkwargs = kwargs
     
     def vsession(self, func):
+        """
+        Decorator for spawning vertibird sessions. Creates the keyword
+        argument "vertibird" for you. You will need to allow the definition of
+        this argument when you define your function. It won't matter if you
+        give it a default value.
+        """
+        
         def wrapper(*args, **kwargs):
             kwargs['vertibird'] = session_generator(
                 *self.vargs,
