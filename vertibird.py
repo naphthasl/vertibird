@@ -1,3 +1,11 @@
+#!/usr/bin/env python
+"""
+Vertibird is a dead-simple virtualization library based around direct access to
+QEMU. Because I couldn't be bothered to figure out how the hell the crappy
+libvirt C bindings work. I also couldn't be bothered to write a million lines
+of XML. Screw that.
+"""
+
 import shelve, threading, time, uuid, socket, subprocess, os, telnetlib, signal
 import sys, shlex, random, string, psutil
 
@@ -12,6 +20,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import scoped_session
 from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.ext.declarative import declarative_base
+
+__author__ = 'Naphtha Nepanthez'
+__version__ = 'RBMK-1000'
+__license__ = 'MIT' # SEE LICENSE FILE
 
 GLOBAL_LOOPBACK = '127.0.0.1'
 QEMU_VNC_ADDS = 5900
