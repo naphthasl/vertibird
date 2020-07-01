@@ -694,7 +694,10 @@ if __name__ == '__main__':
     def main(vertibird):
         x = vertibird
         
-        y = x.get('019d372a-8331-489e-bc9a-8186e89e1ece')
+        if len(x.list()) < 1:
+            y = x.create()
+        else:
+            y = x.get(x.list()[-1])
         
         try:
             y.attach_cdrom(
