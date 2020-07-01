@@ -219,15 +219,6 @@ class Vertibird(object):
                 else:
                     self.disconnect()
             
-            def __wrap(self, func):
-                def wrapper(self, *args, **kwargs):
-                    if self.client == None:
-                        return self.__return_none()
-                    else:
-                        return func(self.client, *args, **kwargs)
-                    
-                return wrapper
-            
             def __return_none(self, *args, **kwargs):
                 return None
             
