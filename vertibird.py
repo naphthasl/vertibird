@@ -12,7 +12,7 @@ import sys, shlex, random, string, psutil
 from contextlib import closing
 
 from vncdotool import api as vncapi
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from sqlalchemy import create_engine
 from sqlalchemy import Column, Integer, String, PickleType, Boolean
@@ -160,6 +160,16 @@ class Vertibird(object):
                 
                 self.client = None
             
+            def refresh(self):
+                """
+                Refresh the display
+                """
+                
+                try:
+                    self.client.refreshScreen()
+                except (TimeoutError, AttributeError):
+                    self.disconnect()
+            
             def capture(self):
                 """
                 Returns a PIL image of the virtual machine display. You can
@@ -175,10 +185,7 @@ class Vertibird(object):
                     - https://vncdotool.readthedocs.io/en/latest/library.html
                 """
                 
-                try:
-                    self.client.refreshScreen()
-                except (TimeoutError, AttributeError):
-                    self.disconnect()
+                self.refresh()
                 
                 if self.client != None:
                     self.shape = self.client.screen.size
@@ -189,7 +196,18 @@ class Vertibird(object):
                         palette = Image.ADAPTIVE
                     )
                 else:
-                    return Image.new(VNC_IMAGE_MODE, self.shape)
+                    offline_message = Image.new(VNC_IMAGE_MODE, self.shape)
+                    ImageDraw.Draw(
+                        offline_message
+                    ).text(
+                        (8, 8),
+                        'Connection to the QEMU VNC server has been lost.',
+                        (255, 255, 0)
+                    )
+                    
+                    self.connect()
+                    
+                    return offline_message
             
             def connect(self):
                 if self.vmlive.state() == 'online':
