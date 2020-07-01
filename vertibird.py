@@ -201,7 +201,7 @@ class Vertibird(object):
                         offline_message
                     ).text(
                         (8, 8),
-                        'Connection to the QEMU VNC server has been lost.',
+                        'NO SIGNAL',
                         (255, 255, 0)
                     )
                     
