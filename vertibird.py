@@ -7,7 +7,7 @@ of XML. Screw that.
 """
 
 import shelve, threading, time, uuid, socket, subprocess, os, telnetlib, signal
-import sys, shlex, random, string, psutil, zlib
+import sys, shlex, random, string, psutil, zlib, builtins
 
 from contextlib import closing
 
@@ -169,7 +169,7 @@ class Vertibird(object):
                 
                 try:
                     self.client.refreshScreen()
-                except (TimeoutError, AttributeError):
+                except (TimeoutError, AttributeError, builtins.AttributeError):
                     self.disconnect()
             
             def capture(self):
@@ -234,7 +234,12 @@ class Vertibird(object):
                             self.keyUp = self.client.keyUp
                             
                             self.capture()
-                        except (vncapi.VNCDoException, TimeoutError):
+                        except (
+                                vncapi.VNCDoException,
+                                TimeoutError,
+                                AttributeError,
+                                builtins.AttributeError
+                            ):
                             self.disconnect()
                 else:
                     self.disconnect()
@@ -345,14 +350,25 @@ class Vertibird(object):
                     )
                 ]
                 
-                for cdrom in self.db_object.cdroms:
+                strdevices = 0
+                
+                for key, cdrom in enumerate(self.db_object.cdroms):
                     if os.path.isfile(cdrom):
+                        internal_id = self.__random_device_id()
+                        
                         arguments += [
                             '-drive',
-                            'file={0},media=cdrom'.format(
+                            'id={0},file={1},if=none,media=cdrom'.format(
+                                internal_id,
                                 shlex.quote(os.path.abspath(cdrom))
+                            ),
+                            '-device',
+                            'ide-cd,drive={0},bus=ide.0,unit={1}'.format(
+                                internal_id,
+                                strdevices
                             )
                         ]
+                        strdevices += 1
                     else:
                         raise LaunchDependencyMissing(cdrom)
                         
@@ -360,7 +376,7 @@ class Vertibird(object):
                     internal_id = self.__random_device_id()
                     
                     if os.path.isfile(drive['path']):
-                        if drive['type'] == 'ide':
+                        if drive['type'] in ['ahci', 'ide']:
                             arguments += [
                                 '-drive',
                                 'id={0},file={1},if=none,format={2}'.format(
@@ -371,11 +387,15 @@ class Vertibird(object):
                                     DISK_FORMAT
                                 ),
                                 '-device',
-                                'ide-hd,drive={0},bus=ahci.{1}'.format(
+                                'ide-hd,drive={0},bus={1}.0,unit={2}'.format(
                                     internal_id,
-                                    key
+                                    (lambda x:
+                                        'ahci' if x == 'ahci' else 'ide'
+                                    )(drive['type']),
+                                    strdevices
                                 )
                             ]
+                            strdevices += 1
                         elif drive['type'] == 'scsi':
                             arguments += [
                                 '-drive',
@@ -387,11 +407,12 @@ class Vertibird(object):
                                     DISK_FORMAT
                                 ),
                                 '-device',
-                                'scsi-hd,drive={0},bus=scsi0.{1}'.format(
+                                'scsi-hd,drive={0},bus=scsi0.0,unit={1}'.format(
                                     internal_id,
-                                    key
+                                    strdevices
                                 )
                             ]
+                            strdevices += 1
                         elif drive['type'] == 'virtio':
                             arguments += [
                                 '-drive',
@@ -558,13 +579,14 @@ class Vertibird(object):
                 The relative OR absolute path of the image. This will be used
                 to identify the image.
             dtype :
-                The interface type for the drive. Can be IDE, SCSI or VirtIO.
+                The interface type for the drive.
+                Can be IDE, AHCI, SCSI or VirtIO.
             """
             
             self.__set_option_offline()
             
             dtype = dtype.lower()
-            if not (dtype in ['ide', 'scsi', 'virtio']):
+            if not (dtype in ['ide', 'scsi', 'virtio', 'ahci']):
                 raise self.InvalidDriveType('No such type {0}.'.format(dtype))
                 
             if not os.path.isfile(img):
@@ -812,7 +834,7 @@ if __name__ == '__main__':
                 y.detach_drive(dsk['path'])
             
             y.attach_cdrom(
-                '/home/naphtha/iso/Windows_2003_Server.iso'
+                '/home/naphtha/iso/win7x86.iso'
             )
             y.create_or_attach_drive(
                 './drives/test.img',
