@@ -33,6 +33,7 @@ STATE_CHECK_CLK_SECS = 0.05
 DEFAULT_DSIZE = 8589934592
 VNC_IMAGE_MODE = 'RGB'
 DISK_FORMAT = 'raw'
+DEBUG = False
 
 class Vertibird(object):
     class IncompatibleOperatingSystem(Exception):
@@ -297,8 +298,6 @@ class Vertibird(object):
                         self.db_object.ports['monitor']
                     ),
                     '-nographic',
-                    #'-display',
-                    #'gtk', # DEBUG ONLY
                     '-serial',
                     'none',
                     '-vnc',
@@ -406,6 +405,13 @@ class Vertibird(object):
                             ]
                     else:
                         raise LaunchDependencyMissing(drive['path'])
+                
+                if DEBUG:
+                    arguments.remove('-nographic')
+                    arguments += [
+                        '-display',
+                        'gtk'
+                    ]
                 
                 # VM LAUNCH
                 pid = subprocess.Popen(arguments).pid
@@ -789,6 +795,9 @@ if __name__ == '__main__':
     
     @vspawner.vsession
     def main(vertibird):
+        global DEBUG
+        DEBUG = True
+        
         x = vertibird
         
         if len(x.list()) < 1:
@@ -797,13 +806,18 @@ if __name__ == '__main__':
             y = x.get(x.list()[-1])
         
         try:
+            for dsk in y.list_cdroms():
+                y.detach_cdrom(dsk)
+            for dsk in y.list_drives():
+                y.detach_drive(dsk['path'])
+            
             y.attach_cdrom(
-                '/home/naphtha/Downloads/ubuntu-20.04-desktop-amd64.iso'
+                '/home/naphtha/iso/Windows_2003_Server.iso'
             )
             y.create_or_attach_drive(
                 './drives/test.img',
                 25769803776,
-                'virtio'
+                'ide'
             )
             
             options = y.get_properties()
@@ -820,10 +834,11 @@ if __name__ == '__main__':
         ), cv2.COLOR_RGB2BGR))
         
         while y.state() == 'online':
-            z = imgGet()
+            time.sleep(1)
+            #z = imgGet()
                 
-            cv2.imshow('image', z)
-            cv2.waitKey(34)
+            #cv2.imshow('image', z)
+            #cv2.waitKey(34)
             
             #i = (lambda i: 'None' if bool(i) == False else i)(input('>>> '))
             #print(eval(i))
