@@ -7,7 +7,7 @@ of XML. Screw that.
 """
 
 import shelve, threading, time, uuid, socket, subprocess, os, telnetlib, signal
-import sys, shlex, random, string, psutil
+import sys, shlex, random, string, psutil, zlib
 
 from contextlib import closing
 
@@ -449,12 +449,12 @@ class Vertibird(object):
             
             self.__set_option_offline()
             
-            fwd_id = str(hash('-'.join([
+            fwd_id = str(zlib.crc32(('-'.join([
                 protocol,
                 external_ip,
                 str(external_port),
                 str(internal_port)
-            ])))
+            ])).encode()))
             
             if not (fwd_id in list(map(
                     (lambda x: x['id']),
@@ -794,10 +794,6 @@ if __name__ == '__main__':
                 './drives/test.img',
                 25769803776,
                 'virtio'
-            )
-            y.forward_port(
-                9001,
-                22
             )
             
             options = y.get_properties()
