@@ -887,7 +887,10 @@ if __name__ == '__main__':
         except:
             pass
                         
-        y.start()
+        try:
+            y.start()
+        except Vertibird.VertiVMLive.InvalidStateChange:
+            print('VM already running')
         
         print('Start non-blocking')
         
