@@ -13,6 +13,7 @@ from contextlib import closing
 
 from vncdotool import api as vncapi
 from PIL import Image, ImageDraw
+from filelock import Timeout, FileLock, SoftFileLock
 
 from sqlalchemy import create_engine
 from sqlalchemy import Column, Integer, String, PickleType, Boolean
@@ -259,37 +260,69 @@ class Vertibird(object):
             def __return_none(self, *args, **kwargs):
                 return None
             
-            def __audio_thread(self):
-                # This thread will automatically clean the audio buffer if
-                # it looks like you aren't reading from it regularly enough
-                while True:
-                    try:
-                        size = os.path.getsize(self.vmlive.audiopipe)
-                    except (FileNotFoundError, TypeError):
-                        size = 0
-                    
-                    if size > AUDIO_MAX_SIZE:
-                        self.audio_grab()
-                        
-                    time.sleep(AUDIO_CLEAR_INTERVAL)
-            
             def audio_grab(self):
                 """
                 Get the virtual machine's current audio buffer. Returns a wav
-                audio stream in bytes.
+                audio stream in bytes. Might not contain any headers.
                 """
                 
                 if self.vmlive.audiopipe != None:
                     try:
-                        out = open(self.vmlive.audiopipe, 'rb+')
+                        out = open(self.vmlive.audiopipe + '.cycle', 'rb+')
+                        out.seek(0)
                         ret = out.read()
+                        out.seek(0)
                         out.truncate(0)
-                        
-                        return ret
                     except FileNotFoundError:
                         self.vmlive.audiopipe = None
                 else:
-                    return b''
+                    ret = b''
+                    
+                if (ret[:4] != b'RIFF'
+                    and ret[8:12] != b'WAVE'):
+                    
+                    header = bytearray(
+                        b'RIFF\x00\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01'  +
+                        b'\x00\x02\x00D\xac\x00\x00\x10\xb1\x02\x00\x04\x00' +
+                        b'\x10\x00data\x00\x00\x00\x00'
+                    )
+                    
+                    ret = header + ret
+                    
+                return ret
+            
+            def __audio_thread(self):
+                    while True:
+                        if self.vmlive.audiopipe != None:
+                            try:
+                                # This lock is important, as it prevents
+                                # multiple processes screwing around with the
+                                # named pipe. You only need one.
+                                with FileLock(self.vmlive.audiopipe):
+                                    cycle = self.vmlive.audiopipe + '.cycle'
+                                
+                                    if not os.path.isfile(cycle):
+                                        open(cycle, 'wb').write(b'')
+                                    
+                                    circbuf = open(cycle, 'rb+')
+                                    
+                                    circbuf.seek(0, os.SEEK_END)
+                                    
+                                    p = open(self.vmlive.audiopipe, 'rb').read(
+                                        16384
+                                    )
+
+                                    circbuf.write(p)
+                                    
+                                    if circbuf.tell() > AUDIO_MAX_SIZE:
+                                        circbuf.seek(0)
+                                        circbuf.truncate(0)
+                                        
+                                    circbuf.close()
+                            except FileNotFoundError:
+                                self.vmlive.audiopipe = None
+                        else:
+                            time.sleep(STATE_CHECK_CLK_SECS)
             
             def __init__(self, vmlive):
                 self.vmlive = vmlive
@@ -359,6 +392,8 @@ class Vertibird(object):
                 
                 self.db_object.audiopipe = tempfile.mkstemp(suffix='.wav')[1]
                 self.db_session.commit()
+                os.remove(self.db_object.audiopipe)
+                os.mkfifo(self.db_object.audiopipe)
                 self.audiopipe = self.db_object.audiopipe
                 
                 arguments = [
@@ -829,12 +864,7 @@ class Vertibird(object):
                     self.__mark_offline()
             
         def __mark_offline(self):
-            self.audiopipe = None
-            
-            try:
-                os.remove(self.db_object.audiopipe)
-            except FileNotFoundError:
-                pass # Already removed by something, perhaps a reboot
+            self.__file_cleanup()
             
             self.db_object.handles = None
             self.db_object.audiopipe = None
@@ -846,6 +876,15 @@ class Vertibird(object):
                 self.display.disconnect()
             except AttributeError:
                 pass # Display not set up yet
+            
+        def __file_cleanup(self):
+            self.audiopipe = None
+            
+            try:
+                os.remove(self.db_object.audiopipe)
+                os.remove(self.db_object.audiopipe + '.cycle')
+            except FileNotFoundError:
+                pass # Already removed by something, perhaps a reboot
             
         def __send_monitor_command(self, command: str):
             with telnetlib.Telnet(

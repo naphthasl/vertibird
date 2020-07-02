@@ -24,7 +24,8 @@ setup(name='vertibird',
         'vncdotool',
         'numpy',
         'python-opencv',
-        'psutil'
+        'psutil',
+        'filelock'
     ],
     platforms='any',
     classifiers=[
