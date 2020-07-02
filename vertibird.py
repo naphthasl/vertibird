@@ -36,6 +36,18 @@ DISK_FORMAT = 'raw'
 DEBUG = False
 
 class Vertibird(object):
+    """
+    WARNING: Be careful with what kinds of input you feed Vertibird. Everything
+    will probably end up being fed to the commandline in some way or another
+    due to the nature of QEMU. If you want my advice, you should ensure that
+    device names, file paths, etc are kept short, restricted to alphanumeric
+    characters only, and absolutely no characters such as the comma, space,
+    semicolon, etc.
+    
+    Just ALWAYS remember that anything you input will be converted into
+    commandline arguments for QEMU.
+    """
+    
     class IncompatibleOperatingSystem(Exception):
         pass
     
