@@ -7,7 +7,7 @@ of XML. Screw that.
 """
 
 import shelve, threading, time, uuid, socket, subprocess, os, telnetlib, signal
-import sys, shlex, random, string, psutil, zlib, builtins
+import sys, shlex, random, string, psutil, zlib, builtins, select
 
 from contextlib import closing
 
@@ -152,6 +152,9 @@ class Vertibird(object):
             pass
         
         class InvalidDriveType(Exception):
+            pass
+            
+        class VMLaunchException(Exception):
             pass
             
         class VMDisplay(object):
@@ -452,7 +455,21 @@ class Vertibird(object):
                     ]
                 
                 # VM LAUNCH
-                pid = subprocess.Popen(arguments).pid
+                process = subprocess.Popen(
+                    arguments,
+                    stderr = subprocess.PIPE,
+                    stdout = open(os.devnull, 'w')
+                )
+                pid = process.pid
+                
+                # Poll-wait once to ensure output or lack thereof
+                time.sleep(STATE_CHECK_CLK_SECS)
+                
+                r, w, e = select.select([ process.stderr ], [], [], 0)
+                if process.stderr in r:
+                    raise self.VMLaunchException(
+                        process.stderr.read().decode()
+                    )
                 
                 self.db_object.pid   = pid
                 self.db_object.state = 'online'
@@ -865,11 +882,14 @@ if __name__ == '__main__':
             options = y.get_properties()
             options['memory'] = 2147483648
             options['cores'] = 4
+            options['sound'] = 'hda'
             y.set_properties(options)
-            
-            y.start()
         except:
             pass
+                        
+        y.start()
+        
+        print('Start non-blocking')
         
         imgGet = (lambda: cv2.cvtColor(np.asarray(
             y.display.capture().convert('RGB')
