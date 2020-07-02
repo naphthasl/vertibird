@@ -30,13 +30,19 @@ GLOBAL_LOOPBACK = '127.0.0.1'
 QEMU_VNC_ADDS = 5900
 TELNET_TIMEOUT_SECS = 1
 VNC_TIMEOUT_SECS = TELNET_TIMEOUT_SECS
-STATE_CHECK_CLK_SECS = 0.1
+STATE_CHECK_CLK_SECS = 0.03
 AUDIO_CLEAR_INTERVAL = 1
 AUDIO_MAX_SIZE = 4194304
+AUDIO_BLOCK_SIZE = 8192
+AUDIO_CHUNKS = 1024
 DEFAULT_DSIZE = 8589934592
 VNC_IMAGE_MODE = 'RGB'
 DISK_FORMAT = 'raw'
 DEBUG = False
+BLANK_WAV_HEADER =\
+    b'RIFF\x00\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01'\
+    b'\x00\x02\x00D\xac\x00\x00\x10\xb1\x02\x00\x04\x00'\
+    b'\x10\x00data\x00\x00\x00\x00'
 
 class Vertibird(object):
     """
@@ -164,6 +170,8 @@ class Vertibird(object):
             pass
             
         class VMDisplay(object):
+            __shared_audio = {}
+            
             def disconnect(self):
                 if self.client != None:
                     del self.client
@@ -268,61 +276,60 @@ class Vertibird(object):
                 
                 if self.vmlive.audiopipe != None:
                     try:
-                        out = open(self.vmlive.audiopipe + '.cycle', 'rb+')
-                        out.seek(0)
-                        ret = out.read()
-                        out.seek(0)
-                        out.truncate(0)
-                    except FileNotFoundError:
-                        self.vmlive.audiopipe = None
+                        ret = bytearray(self.__shared_audio[self.vmlive.id])
+                        self.__shared_audio[self.vmlive.id].clear()
+                    except KeyError:
+                        ret = bytearray()
                 else:
-                    ret = b''
+                    ret = bytearray()
                     
-                if (ret[:4] != b'RIFF'
-                    and ret[8:12] != b'WAVE'):
+                if (ret[:4] == b'RIFF'
+                    and ret[8:12] == b'WAVE'):
                     
-                    header = bytearray(
-                        b'RIFF\x00\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01'  +
-                        b'\x00\x02\x00D\xac\x00\x00\x10\xb1\x02\x00\x04\x00' +
-                        b'\x10\x00data\x00\x00\x00\x00'
-                    )
+                    ret = ret[44:]
                     
-                    ret = header + ret
+                blank = bytearray(BLANK_WAV_HEADER)
+                
+                blank[4:8] = (
+                    (len(blank) + len(ret)) - 8
+                ).to_bytes(4, byteorder='little')
+                
+                blank[40:44] = (
+                    len(ret)
+                ).to_bytes(4, byteorder='little')
+                
+                ret = blank + ret
                     
                 return ret
             
+            
             def __audio_thread(self):
-                    while True:
-                        if self.vmlive.audiopipe != None:
-                            try:
-                                # This lock is important, as it prevents
-                                # multiple processes screwing around with the
-                                # named pipe. You only need one.
-                                with FileLock(self.vmlive.audiopipe):
-                                    cycle = self.vmlive.audiopipe + '.cycle'
+                self.__shared_audio[self.vmlive.id] = bytearray()
+                
+                while True:
+                    if self.vmlive.audiopipe != None:
+                        try:
+                            # This lock is important, as it prevents
+                            # multiple processes screwing around with the
+                            # named pipe. You only need one.
+                            with FileLock(self.vmlive.audiopipe):
+                                f = open(self.vmlive.audiopipe, 'rb')
                                 
-                                    if not os.path.isfile(cycle):
-                                        open(cycle, 'wb').write(b'')
-                                    
-                                    circbuf = open(cycle, 'rb+')
-                                    
-                                    circbuf.seek(0, os.SEEK_END)
-                                    
-                                    p = open(self.vmlive.audiopipe, 'rb').read(
-                                        16384
-                                    )
-
-                                    circbuf.write(p)
-                                    
-                                    if circbuf.tell() > AUDIO_MAX_SIZE:
-                                        circbuf.seek(0)
-                                        circbuf.truncate(0)
+                                # # Experimenting with os.read() instead...
+                                # p = f.read(AUDIO_BLOCK_SIZE)
+                                p = os.read(f.fileno(), AUDIO_BLOCK_SIZE)
+                                
+                                self.__shared_audio[self.vmlive.id] += p
+                                
+                                if len(
+                                        self.__shared_audio[self.vmlive.id]
+                                    ) > AUDIO_MAX_SIZE:
                                         
-                                    circbuf.close()
-                            except FileNotFoundError:
-                                self.vmlive.audiopipe = None
-                        else:
-                            time.sleep(STATE_CHECK_CLK_SECS)
+                                    self.__shared_audio[self.vmlive.id].clear()
+                        except FileNotFoundError:
+                            self.vmlive.audiopipe = None
+                    else:
+                        time.sleep(STATE_CHECK_CLK_SECS)
             
             def __init__(self, vmlive):
                 self.vmlive = vmlive
@@ -351,9 +358,8 @@ class Vertibird(object):
             self.db_session = db_session
             self.db_object  = db_object
             self.audiopipe  = None
+            self.id         = db_object.id
             self.display    = self.VMDisplay(self)
-            
-            self.id = db_object.id
             
             # State checking stuff
             self._state_check()
@@ -882,7 +888,6 @@ class Vertibird(object):
             
             try:
                 os.remove(self.db_object.audiopipe)
-                os.remove(self.db_object.audiopipe + '.cycle')
             except FileNotFoundError:
                 pass # Already removed by something, perhaps a reboot
             
@@ -983,6 +988,9 @@ class VertibirdSpawner(object):
 if __name__ == '__main__':
     import cv2
     import numpy as np
+    import pyaudio
+    import wave
+    import queue
     
     vspawner = VertibirdSpawner()
     
@@ -1031,6 +1039,46 @@ if __name__ == '__main__':
             y.display.capture().convert('RGB')
         ), cv2.COLOR_RGB2BGR))
         
+        def agc(q, y):
+            while True:
+                grab = y.display.audio_grab()
+                
+                if len(grab) > 44:
+                    q.put(grab)
+                else:
+                    time.sleep(STATE_CHECK_CLK_SECS)
+                    
+        dq = queue.Queue()            
+        
+        capthread = threading.Thread(
+            target = agc, args = (dq, y), daemon = True
+        ).start()
+        
+        p = pyaudio.PyAudio()
+        stream = p.open(format=8,
+                        channels=2,
+                        rate=44100,
+                        output=True)
+        silence = chr(0) * 2 * 2 * AUDIO_CHUNKS
+        while y.state() == 'online':
+            try:
+                f = io.BytesIO(dq.get_nowait())
+            except:
+                f = None
+            
+            if f:
+                wf = wave.open(f)
+                
+                stream.write(wf.readframes(wf.getnframes()))
+                
+                wf.close()
+                f.close()
+            else:
+                stream.write(silence)
+                    
+        stream.stop_stream()
+        stream.close()
+ 
         """
         while y.state() == 'online':
             z = imgGet()
