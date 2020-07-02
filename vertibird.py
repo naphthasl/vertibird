@@ -30,6 +30,8 @@ QEMU_VNC_ADDS = 5900
 TELNET_TIMEOUT_SECS = 1
 VNC_TIMEOUT_SECS = TELNET_TIMEOUT_SECS
 STATE_CHECK_CLK_SECS = 0.1
+AUDIO_CLEAR_INTERVAL = 1
+AUDIO_MAX_SIZE = 4194304
 DEFAULT_DSIZE = 8589934592
 VNC_IMAGE_MODE = 'RGB'
 DISK_FORMAT = 'raw'
@@ -256,25 +258,44 @@ class Vertibird(object):
             
             def __return_none(self, *args, **kwargs):
                 return None
-                
+            
             def __audio_thread(self):
+                # This thread will automatically clean the audio buffer if
+                # it looks like you aren't reading from it regularly enough
                 while True:
-                    if self.vmlive.audiopipe != None:
-                        try:
-                            self.audio.write(
-                                open(self.vmlive.audiopipe, 'rb').read(65536)
-                            )
-                        except FileNotFoundError:
-                            self.vmlive.audiopipe = None
-                    else:
-                        time.sleep(STATE_CHECK_CLK_SECS)
+                    try:
+                        size = os.path.getsize(self.vmlive.audiopipe)
+                    except (FileNotFoundError, TypeError):
+                        size = 0
+                    
+                    if size > AUDIO_MAX_SIZE:
+                        self.audio_grab()
+                        
+                    time.sleep(AUDIO_CLEAR_INTERVAL)
+            
+            def audio_grab(self):
+                """
+                Get the virtual machine's current audio buffer. Returns a wav
+                audio stream in bytes.
+                """
+                
+                if self.vmlive.audiopipe != None:
+                    try:
+                        out = open(self.vmlive.audiopipe, 'rb+')
+                        ret = out.read()
+                        out.truncate(0)
+                        
+                        return ret
+                    except FileNotFoundError:
+                        self.vmlive.audiopipe = None
+                else:
+                    return b''
             
             def __init__(self, vmlive):
                 self.vmlive = vmlive
                 self.client = None
                 self.disconnect()
                 self.shape = (640, 480)
-                self.audio = io.BytesIO()
                 
                 self.threads = []
                 self.threads.append(
@@ -338,8 +359,6 @@ class Vertibird(object):
                 
                 self.db_object.audiopipe = tempfile.mkstemp(suffix='.wav')[1]
                 self.db_session.commit()
-                os.remove(self.db_object.audiopipe)
-                os.mkfifo(self.db_object.audiopipe)
                 self.audiopipe = self.db_object.audiopipe
                 
                 arguments = [
