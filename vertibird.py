@@ -30,11 +30,11 @@ GLOBAL_LOOPBACK = '127.0.0.1'
 QEMU_VNC_ADDS = 5900
 TELNET_TIMEOUT_SECS = 1
 VNC_TIMEOUT_SECS = TELNET_TIMEOUT_SECS
-STATE_CHECK_CLK_SECS = 0.03
+STATE_CHECK_CLK_SECS = 0.04
 AUDIO_CLEAR_INTERVAL = 1
 AUDIO_MAX_SIZE = 4194304
-AUDIO_BLOCK_SIZE = 8192
-AUDIO_CHUNKS = 1024
+AUDIO_BLOCK_SIZE = 4096
+AUDIO_CHUNKS = round(AUDIO_BLOCK_SIZE / 4)
 DEFAULT_DSIZE = 8589934592
 VNC_IMAGE_MODE = 'RGB'
 DISK_FORMAT = 'raw'
@@ -443,6 +443,10 @@ class Vertibird(object):
                     'wav,path={0},id=audioout'.format(
                         shlex.quote(self.db_object.audiopipe)
                     ),
+                    '-device',
+                    'piix3-usb-uhci,id=usb',
+                    '-device',
+                    'usb-tablet,id=input0',
                     '-device',
                     'rtl8139,netdev=net0',
                     '-netdev',
@@ -1039,46 +1043,33 @@ if __name__ == '__main__':
             y.display.capture().convert('RGB')
         ), cv2.COLOR_RGB2BGR))
         
-        def agc(q, y):
+        def audplay(y):
+            p = pyaudio.PyAudio()
+            stream = p.open(format=8,
+                            channels=2,
+                            rate=44100,
+                            output=True)
+            
+            silence = chr(0) * 2 * 2 * AUDIO_CHUNKS
             while True:
                 grab = y.display.audio_grab()
                 
                 if len(grab) > 44:
-                    q.put(grab)
-                else:
-                    time.sleep(STATE_CHECK_CLK_SECS)
+                    wf = wave.open(io.BytesIO(grab))
                     
-        dq = queue.Queue()            
-        
-        capthread = threading.Thread(
-            target = agc, args = (dq, y), daemon = True
+                    stream.write(wf.readframes(wf.getnframes()))
+                    
+                    wf.close()
+                else:
+                    stream.write(silence)
+                        
+            stream.stop_stream()
+            stream.close()
+
+        adpthread = threading.Thread(
+            target = audplay, args = (y,), daemon = True
         ).start()
         
-        p = pyaudio.PyAudio()
-        stream = p.open(format=8,
-                        channels=2,
-                        rate=44100,
-                        output=True)
-        silence = chr(0) * 2 * 2 * AUDIO_CHUNKS
-        while y.state() == 'online':
-            try:
-                f = io.BytesIO(dq.get_nowait())
-            except:
-                f = None
-            
-            if f:
-                wf = wave.open(f)
-                
-                stream.write(wf.readframes(wf.getnframes()))
-                
-                wf.close()
-                f.close()
-            else:
-                stream.write(silence)
-                    
-        stream.stop_stream()
-        stream.close()
- 
         """
         while y.state() == 'online':
             z = imgGet()
@@ -1086,8 +1077,8 @@ if __name__ == '__main__':
             cv2.imshow('image', z)
             cv2.waitKey(34)
             
-            #i = (lambda i: 'None' if bool(i) == False else i)(input('>>> '))
-            #print(eval(i))
+            i = (lambda i: 'None' if bool(i) == False else i)(input('>>> '))
+            print(eval(i))
         """
         
         y.wait()
