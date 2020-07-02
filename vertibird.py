@@ -72,9 +72,6 @@ class Vertibird(object):
         self.engine = create_engine(persistence, strategy='threadlocal')
         self.Base.metadata.create_all(self.engine)
         self.db = scoped_session((sessionmaker(bind = self.engine)))()
-        
-        for x in self.list():
-            self.get(x)._state_check()
     
     def create(self):
         """
