@@ -268,6 +268,14 @@ class Vertibird(object):
             # State checking stuff
             self._state_check()
             
+        def wait(self):
+            """
+            Waits until this VM has been terminated.
+            """
+            
+            while self.state() != 'offline':
+                time.sleep(STATE_CHECK_CLK_SECS)
+            
         def remove(self):
             """
             Removes the virtual machine from the database. Will NOT delete
@@ -855,15 +863,18 @@ if __name__ == '__main__':
             y.display.capture().convert('RGB')
         ), cv2.COLOR_RGB2BGR))
         
+        """
         while y.state() == 'online':
-            time.sleep(1)
-            #z = imgGet()
+            z = imgGet()
                 
-            #cv2.imshow('image', z)
-            #cv2.waitKey(34)
+            cv2.imshow('image', z)
+            cv2.waitKey(34)
             
             #i = (lambda i: 'None' if bool(i) == False else i)(input('>>> '))
             #print(eval(i))
+        """
+        
+        y.wait()
         
         if y.state() == 'online':
             y.stop()
