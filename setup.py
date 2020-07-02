@@ -20,7 +20,7 @@ setup(name='vertibird',
     license=vertibird.__license__,
     install_requires=[
         'sqlalchemy',
-        'Pillow',
+        'pillow-simd',
         'vncdotool',
         'numpy',
         'python-opencv',
