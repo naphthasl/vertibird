@@ -7,7 +7,7 @@ of XML. Screw that.
 """
 
 import shelve, threading, time, uuid, socket, subprocess, os, telnetlib, signal
-import sys, shlex, random, string, psutil, zlib, builtins, select
+import sys, shlex, random, string, psutil, zlib, builtins, select, tempfile, io
 
 from contextlib import closing
 
@@ -29,7 +29,7 @@ GLOBAL_LOOPBACK = '127.0.0.1'
 QEMU_VNC_ADDS = 5900
 TELNET_TIMEOUT_SECS = 1
 VNC_TIMEOUT_SECS = TELNET_TIMEOUT_SECS
-STATE_CHECK_CLK_SECS = 0.05
+STATE_CHECK_CLK_SECS = 0.1
 DEFAULT_DSIZE = 8589934592
 VNC_IMAGE_MODE = 'RGB'
 DISK_FORMAT = 'raw'
@@ -154,16 +154,16 @@ class Vertibird(object):
         class InvalidDriveType(Exception):
             pass
             
+        class InvalidGenericDeviceType(Exception):
+            pass
+            
         class VMLaunchException(Exception):
             pass
             
         class VMDisplay(object):
             def disconnect(self):
                 if self.client != None:
-                    try:
-                        self.client.disconnect()
-                    except:
-                        pass
+                    del self.client
                 
                 self.paste = self.__return_none
                 self.mouseMove = self.__return_none
@@ -224,46 +224,66 @@ class Vertibird(object):
                     return offline_message
             
             def connect(self):
-                if self.vmlive.state() == 'online':
-                    start_time = time.time()
-                    
-                    while (self.client == None
-                            or (time.time() - start_time) > VNC_TIMEOUT_SECS
+                self.disconnect()
+                start_time = time.time()
+                
+                while (self.client == None
+                        or (time.time() - start_time) > VNC_TIMEOUT_SECS
+                    ) and (self.vmlive.state() == 'online'):
+                        
+                    try:
+                        self.client = vncapi.connect('{0}:{1}'.format(
+                            GLOBAL_LOOPBACK,
+                            (self.vmlive.db_object.ports['vnc']
+                            - QEMU_VNC_ADDS)
+                        ), password = None, timeout = VNC_TIMEOUT_SECS)
+                        
+                        self.paste = self.client.paste
+                        self.mouseMove = self.client.mouseMove
+                        self.mouseDown = self.client.mouseDown
+                        self.mouseUp = self.client.mouseUp
+                        self.keyDown = self.client.keyDown
+                        self.keyUp = self.client.keyUp
+                        
+                        self.capture()
+                    except (
+                            vncapi.VNCDoException,
+                            TimeoutError,
+                            AttributeError,
+                            builtins.AttributeError
                         ):
-                            
-                        try:
-                            self.client = vncapi.connect('{0}:{1}'.format(
-                                GLOBAL_LOOPBACK,
-                                (self.vmlive.db_object.ports['vnc']
-                                - QEMU_VNC_ADDS)
-                            ), password = None, timeout = VNC_TIMEOUT_SECS)
-                            
-                            self.paste = self.client.paste
-                            self.mouseMove = self.client.mouseMove
-                            self.mouseDown = self.client.mouseDown
-                            self.mouseUp = self.client.mouseUp
-                            self.keyDown = self.client.keyDown
-                            self.keyUp = self.client.keyUp
-                            
-                            self.capture()
-                        except (
-                                vncapi.VNCDoException,
-                                TimeoutError,
-                                AttributeError,
-                                builtins.AttributeError
-                            ):
-                            self.disconnect()
-                else:
-                    self.disconnect()
+                        self.disconnect()
             
             def __return_none(self, *args, **kwargs):
                 return None
+                
+            def __audio_thread(self):
+                while True:
+                    if self.vmlive.audiopipe != None:
+                        try:
+                            self.audio.write(
+                                open(self.vmlive.audiopipe, 'rb').read(65536)
+                            )
+                        except FileNotFoundError:
+                            self.vmlive.audiopipe = None
+                    else:
+                        time.sleep(STATE_CHECK_CLK_SECS)
             
             def __init__(self, vmlive):
                 self.vmlive = vmlive
                 self.client = None
                 self.disconnect()
                 self.shape = (640, 480)
+                self.audio = io.BytesIO()
+                
+                self.threads = []
+                self.threads.append(
+                    threading.Thread(
+                        target = self.__audio_thread,
+                        daemon = True
+                    )
+                )
+                self.threads[-1].start()
                 
                 self.connect()
                         
@@ -276,6 +296,7 @@ class Vertibird(object):
             self.vertibird  = vertibird
             self.db_session = db_session
             self.db_object  = db_object
+            self.audiopipe  = None
             self.display    = self.VMDisplay(self)
             
             self.id = db_object.id
@@ -315,6 +336,12 @@ class Vertibird(object):
             if self.state() == 'offline':
                 self.__randomize_ports()
                 
+                self.db_object.audiopipe = tempfile.mkstemp(suffix='.wav')[1]
+                self.db_session.commit()
+                os.remove(self.db_object.audiopipe)
+                os.mkfifo(self.db_object.audiopipe)
+                self.audiopipe = self.db_object.audiopipe
+                
                 arguments = [
                     self.vertibird.qemu, # PROCESS
                     '-monitor',
@@ -352,8 +379,10 @@ class Vertibird(object):
                     'lsi53c895a,id=scsi',
                     '-device',
                     'ahci,id=ahci',
-                    '-soundhw',
-                    shlex.quote(self.db_object.sound),
+                    '-audiodev',
+                    'wav,path={0},id=audioout'.format(
+                        shlex.quote(self.db_object.audiopipe)
+                    ),
                     '-device',
                     'rtl8139,netdev=net0',
                     '-netdev',
@@ -371,6 +400,23 @@ class Vertibird(object):
                         ])
                     )
                 ]
+                
+                if self.db_object.sound == 'ac97':
+                    arguments += [
+                        '-device',
+                        'AC97,audiodev=audioout'
+                    ]
+                elif self.db_object.sound == 'hda':
+                    arguments += [
+                        '-device',
+                        'intel-hda,id=hda',
+                        '-device',
+                        'hda-output,id=hda-codec,audiodev=audioout'
+                    ]
+                else:
+                    raise InvalidGenericDeviceType(
+                        'Audio device type must be either ac97 or hda.'
+                    )
                 
                 strdevices = 0
                 
@@ -446,6 +492,10 @@ class Vertibird(object):
                                     DISK_FORMAT
                                 )
                             ]
+                        else:
+                            raise InvalidGenericDeviceType(
+                                'Drive type must be virtio, scsi, ahci or ide.'
+                            )
                     else:
                         raise LaunchDependencyMissing(drive['path'])
                 
@@ -460,19 +510,14 @@ class Vertibird(object):
                 process = subprocess.Popen(
                     arguments,
                     stderr = subprocess.PIPE,
-                    stdout = open(os.devnull, 'w')
+                    stdout = subprocess.PIPE
                 )
                 pid = process.pid
                 
-                # Poll-wait once to ensure output or lack thereof
-                time.sleep(STATE_CHECK_CLK_SECS)
-                
-                r, w, e = select.select([ process.stderr ], [], [], 0)
-                if process.stderr in r:
-                    raise self.VMLaunchException(
-                        process.stderr.read().decode()
-                    )
-                
+                self.db_object.handles = (
+                    process.stderr.fileno(),
+                    process.stdout.fileno()
+                )
                 self.db_object.pid   = pid
                 self.db_object.state = 'online'
                 self.db_session.commit()
@@ -733,7 +778,22 @@ class Vertibird(object):
             
             self._state_check()
             
+            if self.db_object.state != 'offline':
+                self.audiopipe = self.db_object.audiopipe
+            
             return self.db_object.state
+            
+        def stderr(self, *args, **kwargs):
+            if self.db_object.handles:
+                return os.fdopen(self.db_object.handles[0], *args, **kwargs)
+            else:
+                raise self.InvalidStateChange('Invalid state for stderr()!')
+            
+        def stdout(self, *args, **kwargs):
+            if self.db_object.handles:
+                return os.fdopen(self.db_object.handles[1], *args, **kwargs)
+            else:
+                raise self.InvalidStateChange('Invalid state for stdout()!')
             
         def _state_check(self):
             # Check if QEMU instance is actually still running
@@ -750,6 +810,15 @@ class Vertibird(object):
                     self.__mark_offline()
             
         def __mark_offline(self):
+            self.audiopipe = None
+            
+            try:
+                os.remove(self.db_object.audiopipe)
+            except FileNotFoundError:
+                pass # Already removed by something, perhaps a reboot
+            
+            self.db_object.handles = None
+            self.db_object.audiopipe = None
             self.db_object.pid   = None
             self.db_object.state = 'offline'
             self.db_session.commit()
@@ -795,7 +864,9 @@ class Vertibird(object):
         
         id         = Column(String, primary_key=True)
         ports      = Column(PickleType)
+        handles    = Column(PickleType)
         pid        = Column(Integer)
+        audiopipe  = Column(String)
         state      = Column(String, default = 'offline')
         memory     = Column(Integer, default = 134217728)
         cores      = Column(Integer, default = 1)
@@ -887,7 +958,6 @@ if __name__ == '__main__':
             options = y.get_properties()
             options['memory'] = 2147483648
             options['cores'] = 4
-            options['sound'] = 'hda'
             y.set_properties(options)
         except:
             pass
