@@ -333,7 +333,9 @@ class Vertibird(object):
                     '-m',
                     '{0}B'.format(self.db_object.memory),
                     '-boot',
-                    'order=cdn,menu=on',
+                    'order={0},menu=on'.format(
+                        shlex.quote(self.db_object.bootorder)
+                    ),
                     '-cpu',
                     shlex.quote(self.db_object.cpu),
                     '-smp',
@@ -486,12 +488,13 @@ class Vertibird(object):
             and graphics adapter model.
             """
             return {
-                'memory'    : self.db_object.memory  ,
-                'cores'     : self.db_object.cores   ,
-                'cpu'       : self.db_object.cpu     ,
-                'machine'   : self.db_object.machine ,
-                'vga'       : self.db_object.vga     ,
-                'sound'     : self.db_object.sound   ,
+                'memory'    : self.db_object.memory   ,
+                'cores'     : self.db_object.cores    ,
+                'cpu'       : self.db_object.cpu      ,
+                'machine'   : self.db_object.machine  ,
+                'vga'       : self.db_object.vga      ,
+                'sound'     : self.db_object.sound    ,
+                'bootorder' : self.db_object.bootorder,
             }
         
         def set_properties(self, properties: dict):
@@ -501,12 +504,13 @@ class Vertibird(object):
             """
             self.__set_option_offline()
             
-            self.db_object.memory    = int(properties['memory' ])
-            self.db_object.cores     = int(properties['cores'  ])
-            self.db_object.cpu       = str(properties['cpu'    ])
-            self.db_object.machine   = str(properties['machine'])
-            self.db_object.vga       = str(properties['vga'    ])
-            self.db_object.sound     = str(properties['sound'  ])
+            self.db_object.memory    = int(properties['memory'   ])
+            self.db_object.cores     = int(properties['cores'    ])
+            self.db_object.cpu       = str(properties['cpu'      ])
+            self.db_object.machine   = str(properties['machine'  ])
+            self.db_object.vga       = str(properties['vga'      ])
+            self.db_object.sound     = str(properties['sound'    ])
+            self.db_object.bootorder = str(properties['bootorder'])
             self.db_session.commit()
         
         def forward_port(self,
@@ -799,6 +803,7 @@ class Vertibird(object):
         machine    = Column(String, default = 'pc')
         vga        = Column(String, default = 'std')
         sound      = Column(String, default = 'hda')
+        bootorder  = Column(String, default = 'cdn')
         cdroms     = Column(PickleType, default = [])
         drives     = Column(PickleType, default = [])
         forwarding = Column(PickleType, default = [])
