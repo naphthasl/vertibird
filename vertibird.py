@@ -324,7 +324,7 @@ class Vertibird(object):
                     '-vga',
                     shlex.quote(self.db_object.vga),
                     '-device',
-                    'lsi53c895a,id=scsi0',
+                    'lsi53c895a,id=scsi',
                     '-device',
                     'ahci,id=ahci',
                     '-soundhw',
@@ -404,7 +404,7 @@ class Vertibird(object):
                                     DISK_FORMAT
                                 ),
                                 '-device',
-                                'scsi-hd,drive={0},bus=scsi0.0,unit={1}'.format(
+                                'scsi-hd,drive={0},bus=scsi.0,unit={1}'.format(
                                     internal_id,
                                     strdevices
                                 )
