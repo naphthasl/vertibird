@@ -39,6 +39,7 @@ AUDIO_BLOCK_SIZE = 4096
 AUDIO_CHUNKS = round(AUDIO_BLOCK_SIZE / 4)
 DEFAULT_DSIZE = 8589934592
 VNC_IMAGE_MODE = 'RGB'
+VNC_NO_SIGNAL_MESSAGE = 'Unable to retrieve frames from VNC server right now.'
 DISK_FORMAT = 'raw'
 DEBUG = False
 BLANK_WAV_HEADER =\
@@ -234,7 +235,7 @@ class Vertibird(object):
                         offline_message
                     ).text(
                         (8, 8),
-                        'NO SIGNAL',
+                        VNC_NO_SIGNAL_MESSAGE,
                         (255, 255, 0)
                     )
                     
