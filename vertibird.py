@@ -368,6 +368,11 @@ class Vertibird(object):
             # State checking stuff
             self._state_check()
             
+        def __del__(self):
+            # Check state on exit/delete too, just in case.
+            # (Also to ensure named pipe for audio is deleted)
+            self._state_check()
+            
         def wait(self):
             """
             Waits until this VM has been terminated.
@@ -432,11 +437,18 @@ class Vertibird(object):
                     '-smp',
                     str(self.db_object.cores),
                     '-machine',
-                    self.__argescape(self.db_object.machine),
+                    'type={0},accel=kvm'.format(
+                        self.__argescape(self.db_object.machine)
+                    ),
+                    '-enable-kvm',
                     '-object',
                     'rng-random,id=rng0,filename=/dev/urandom',
                     '-device',
                     'virtio-rng-pci,rng=rng0',
+                    '-rtc',
+                    'base={0},clock=host'.format(
+                        self.__argescape(self.db_object.rtc)
+                    ),
                     '-vga',
                     self.__argescape(self.db_object.vga),
                     '-device',
@@ -590,6 +602,7 @@ class Vertibird(object):
                     stderr = subprocess.PIPE,
                     stdout = subprocess.PIPE
                 )
+
                 pid = process.pid
                 
                 self.db_object.handles = (
@@ -622,6 +635,7 @@ class Vertibird(object):
                 'floppy'    : self.db_object.floppy   ,
                 'numa'      : self.db_object.numa     ,
                 'scsi'      : self.db_object.scsi     ,
+                'rtc'       : self.db_object.rtc      ,
             }
         
         def set_properties(self, properties: dict):
@@ -642,6 +656,7 @@ class Vertibird(object):
             floppy    =     (properties['floppy'   ])
             scsi      = str (properties['scsi'     ])
             numa      = bool(properties['numa'     ])
+            rtc       = str (properties['rtc'      ])
             
             if memory < 8388608:
                 raise self.InvalidArgument('Memory allocation too low')
@@ -705,6 +720,8 @@ class Vertibird(object):
             elif (floppy != None):
                 if (not os.path.isfile(floppy)) or (type(floppy) != str):
                     raise self.InvalidArgument('Invalid floppy file')
+            elif not (rtc in ['utc', 'localtime']):
+                raise self.InvalidArgument('Invalid RTC clock parameters')
             
             self.db_object.memory    = memory
             self.db_object.cores     = cores
@@ -717,6 +734,7 @@ class Vertibird(object):
             self.db_object.floppy    = floppy
             self.db_object.scsi      = scsi
             self.db_object.numa      = numa
+            self.db_object.rtc       = rtc
             self.db_session.commit()
         
         def forward_port(self,
@@ -1085,6 +1103,7 @@ class Vertibird(object):
         bootorder  = Column(String, default = 'cdn')
         network    = Column(String, default = 'rtl8139')
         scsi       = Column(String, default = 'lsi53c895a')
+        rtc        = Column(String, default = 'localtime')
         floppy     = Column(String)
         numa       = Column(Boolean, default = False)
         cdroms     = Column(PickleType, default = [])
