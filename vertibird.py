@@ -169,6 +169,9 @@ class Vertibird(object):
         class VMLaunchException(Exception):
             pass
             
+        class InvalidArgument(Exception):
+            pass
+            
         class VMDisplay(object):
             __shared_audio = {}
             
@@ -421,34 +424,36 @@ class Vertibird(object):
                     '{0}B'.format(self.db_object.memory),
                     '-boot',
                     'order={0},menu=on'.format(
-                        shlex.quote(self.db_object.bootorder)
+                        self.__argescape(self.db_object.bootorder)
                     ),
                     '-cpu',
-                    shlex.quote(self.db_object.cpu),
+                    self.__argescape(self.db_object.cpu),
                     '-smp',
                     str(self.db_object.cores),
                     '-machine',
-                    shlex.quote(self.db_object.machine),
+                    self.__argescape(self.db_object.machine),
                     '-object',
                     'rng-random,id=rng0,filename=/dev/urandom',
                     '-device',
                     'virtio-rng-pci,rng=rng0',
                     '-vga',
-                    shlex.quote(self.db_object.vga),
+                    self.__argescape(self.db_object.vga),
                     '-device',
                     'lsi53c895a,id=scsi',
                     '-device',
                     'ahci,id=ahci',
                     '-audiodev',
                     'wav,path={0},id=audioout'.format(
-                        shlex.quote(self.db_object.audiopipe)
+                        self.__argescape(self.db_object.audiopipe)
                     ),
                     '-device',
                     'piix3-usb-uhci,id=usb',
                     '-device',
                     'usb-tablet,id=input0',
                     '-device',
-                    'rtl8139,netdev=net0',
+                    '{0},netdev=net0'.format(
+                        self.__argescape(self.db_object.network)
+                    ),
                     '-netdev',
                     'user,id=net0{0}{1}'.format(
                         (lambda x: ',' if x > 0 else '')(
@@ -456,10 +461,10 @@ class Vertibird(object):
                         ),
                         ','.join([
                             'hostfwd={0}:{1}:{2}-:{3}'.format(
-                                shlex.quote(x['protocol']),
-                                shlex.quote(x['external_ip']),
-                                shlex.quote(x['external_port']),
-                                shlex.quote(x['internal_port'])
+                                self.__argescape(x['protocol']),
+                                self.__argescape(x['external_ip']),
+                                self.__argescape(x['external_port']),
+                                self.__argescape(x['internal_port'])
                             ) for x in self.db_object.forwarding
                         ])
                     )
@@ -492,7 +497,7 @@ class Vertibird(object):
                             '-drive',
                             'id={0},file={1},if=none,media=cdrom'.format(
                                 internal_id,
-                                shlex.quote(os.path.abspath(cdrom))
+                                self.__argescape(os.path.abspath(cdrom))
                             ),
                             '-device',
                             'ide-cd,drive={0},bus=ide.0,unit={1}'.format(
@@ -508,40 +513,30 @@ class Vertibird(object):
                     internal_id = self.__random_device_id()
                     
                     if os.path.isfile(drive['path']):
-                        if drive['type'] in ['ahci', 'ide']:
+                        if drive['type'] in ['ahci', 'ide', 'scsi']:
                             arguments += [
                                 '-drive',
                                 'id={0},file={1},if=none,format={2}'.format(
                                     internal_id,
-                                    shlex.quote(
+                                    self.__argescape(
                                         os.path.abspath(drive['path'])
                                     ),
                                     DISK_FORMAT
                                 ),
                                 '-device',
-                                'ide-hd,drive={0},bus={1}.0,unit={2}'.format(
+                                {
+                                    'ahci': '{3},drive={0},bus={1}.0',
+                                    'ide': '{3},drive={0},bus={1}.0,unit={2}',
+                                    'scsi': '{3},drive={0},bus={1}.0'
+                                }[drive['type']].format(
                                     internal_id,
-                                    (lambda x:
-                                        'ahci' if x == 'ahci' else 'ide'
-                                    )(drive['type']),
-                                    strdevices
-                                )
-                            ]
-                            strdevices += 1
-                        elif drive['type'] == 'scsi':
-                            arguments += [
-                                '-drive',
-                                'id={0},file={1},if=none,format={2}'.format(
-                                    internal_id,
-                                    shlex.quote(
-                                        os.path.abspath(drive['path'])
-                                    ),
-                                    DISK_FORMAT
-                                ),
-                                '-device',
-                                'scsi-hd,drive={0},bus=scsi.0,unit={1}'.format(
-                                    internal_id,
-                                    strdevices
+                                    self.__argescape(drive['type']),
+                                    strdevices,
+                                    {
+                                        'ahci': 'ide-hd',
+                                        'ide': 'ide-hd',
+                                        'scsi': 'scsi-hd'
+                                    }[drive['type']]
                                 )
                             ]
                             strdevices += 1
@@ -550,7 +545,7 @@ class Vertibird(object):
                                 '-drive',
                                 'id={0},file={1},if=virtio,format={2}'.format(
                                     internal_id,
-                                    shlex.quote(
+                                    self.__argescape(
                                         os.path.abspath(drive['path'])
                                     ),
                                     DISK_FORMAT
@@ -604,6 +599,7 @@ class Vertibird(object):
                 'vga'       : self.db_object.vga      ,
                 'sound'     : self.db_object.sound    ,
                 'bootorder' : self.db_object.bootorder,
+                'network'   : self.db_object.network  ,
             }
         
         def set_properties(self, properties: dict):
@@ -620,6 +616,7 @@ class Vertibird(object):
             self.db_object.vga       = str(properties['vga'      ])
             self.db_object.sound     = str(properties['sound'    ])
             self.db_object.bootorder = str(properties['bootorder'])
+            self.db_object.network   = str(properties['network'  ])
             self.db_session.commit()
         
         def forward_port(self,
@@ -895,6 +892,15 @@ class Vertibird(object):
             except FileNotFoundError:
                 pass # Already removed by something, perhaps a reboot
             
+        def __argescape(self, i: str):
+            if any((c in set(',=!?<>~#@:;$*()[]{}&%"\'\\+')) for c in i):
+                raise self.InvalidArgument(
+                    ('Attempted to supply a malformed argument to QEMU! ' +
+                     'String was: {0}'.format(i))
+                )
+            
+            return shlex.quote(i)
+            
         def __send_monitor_command(self, command: str):
             with telnetlib.Telnet(
                 GLOBAL_LOOPBACK,
@@ -942,6 +948,7 @@ class Vertibird(object):
         vga        = Column(String, default = 'std')
         sound      = Column(String, default = 'hda')
         bootorder  = Column(String, default = 'cdn')
+        network    = Column(String, default = 'rtl8139')
         cdroms     = Column(PickleType, default = [])
         drives     = Column(PickleType, default = [])
         forwarding = Column(PickleType, default = [])
@@ -1022,7 +1029,7 @@ if __name__ == '__main__':
             y.create_or_attach_drive(
                 './drives/test.img',
                 25769803776,
-                'ide'
+                'ahci'
             )
             
             options = y.get_properties()
