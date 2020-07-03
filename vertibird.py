@@ -369,9 +369,6 @@ class Vertibird(object):
                 Automatically converts the named pipe into a ZMQ broadcast.
                 """
                 
-                # Each thread will need a thread-local DB session :/
-                tldb = self.__threads_get_db_object()
-                
                 while True:
                     while self.vmlive.audiopipe == None:
                         time.sleep(STATE_CHECK_CLK_SECS)
@@ -382,10 +379,11 @@ class Vertibird(object):
                     with FileLock(self.vmlive.audiopipe):
                         context = zmq.Context()
                         socket = context.socket(zmq.PUB)
+                        
                         try:
                             socket.bind('tcp://{0}:{1}'.format(
                                 GLOBAL_LOOPBACK,
-                                tldb.ports['audio']
+                                self.vmlive.ports['audio']
                             ))
                         except zmq.error.ZMQError:
                             continue
@@ -400,7 +398,6 @@ class Vertibird(object):
                                         raise OSError('Pipe missing')
                                     
                                     p = os.read(f.fileno(), AUDIO_BLOCK_SIZE)
-                                    
                                     socket.send(p)
                                 except (FileNotFoundError, OSError):
                                     self.vmlive.audiopipe = None
@@ -413,8 +410,6 @@ class Vertibird(object):
                     time.sleep(STATE_CHECK_CLK_SECS)
             
             def __audio_get_thread(self):
-                tldb = self.__threads_get_db_object()
-                
                 while True:
                     try:
                         context = zmq.Context()
@@ -425,7 +420,7 @@ class Vertibird(object):
                         )
                         sub.connect('tcp://{0}:{1}'.format(
                             GLOBAL_LOOPBACK,
-                            tldb.ports['audio']
+                            self.vmlive.ports['audio']
                         ))
                         
                         while self.connected:
@@ -436,13 +431,6 @@ class Vertibird(object):
                         time.sleep(STATE_CHECK_CLK_SECS)
                     except zmq.error.Again:
                         pass
-            
-            def __threads_get_db_object(self):
-                return self.vmlive.vertibird.scoped_db().query(
-                    self.vmlive.vertibird.VertiVM
-                ).filter(
-                    self.vmlive.vertibird.VertiVM.id == self.vmlive.id
-                ).one()
             
             def __init__(self, vmlive):
                 self.vmlive = vmlive
@@ -485,6 +473,7 @@ class Vertibird(object):
             self.db_object  = db_object
             self.audiopipe  = None
             self.id         = db_object.id
+            self.ports      = db_object.ports
             self.display    = self.VMDisplay(self)
             
             # State checking stuff
@@ -1214,8 +1203,13 @@ class Vertibird(object):
                 session.close()
             
         def __randomize_ports(self):
-            self.db_object.ports = self.vertibird._new_ports()
-            self.db_session.commit()
+            for x in self.db_object.ports.values():
+                if not self.vertibird._check_port_open(x):
+                    self.db_object.ports = self.vertibird._new_ports()
+                    self.db_session.commit()
+                    self.ports = self.db_object.ports
+                    
+                    break
             
         def __random_device_id(self, length: int = 16):
             return ''.join(
@@ -1261,6 +1255,18 @@ class Vertibird(object):
             s.bind(('', 0))
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             return s.getsockname()[1]
+    
+    def _check_port_open(self, port):
+        host = GLOBAL_LOOPBACK
+        
+        with closing(
+                socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            ) as sock:
+                
+            if sock.connect_ex((host, port)) == 0:
+                return True
+            else:
+                return False
     
     def _new_ports(self):
         return {
@@ -1335,8 +1341,6 @@ if __name__ == '__main__':
             y = x.create()
         else:
             y = x.get(x.list()[-1])
-        
-        displaytwo = Vertibird.VertiVMLive.VMDisplay(y)
         
         if y.state() == 'offline':
             for dsk in y.list_cdroms():
