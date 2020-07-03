@@ -638,7 +638,7 @@ class Vertibird(object):
             sound     = str (properties['sound'    ])
             bootorder = str (properties['bootorder'])
             network   = str (properties['network'  ])
-            floppy    = str (properties['floppy'   ])
+            floppy    =     (properties['floppy'   ])
             scsi      = str (properties['scsi'     ])
             numa      = bool(properties['numa'     ])
             
@@ -701,8 +701,9 @@ class Vertibird(object):
                 raise self.InvalidArgument('Invalid SCSI controller type')
             elif (not set('abcdnp').issuperset(bootorder)):
                 raise self.InvalidArgument('Invalid boot order')
-            elif (floppy != None) and (not os.path.isfile(floppy)):
-                raise self.InvalidArgument('Invalid floppy file')
+            elif (floppy != None):
+                if (not os.path.isfile(floppy)) or (type(floppy) != str):
+                    raise self.InvalidArgument('Invalid floppy file')
             
             self.db_object.memory    = memory
             self.db_object.cores     = cores
@@ -1118,7 +1119,7 @@ if __name__ == '__main__':
         else:
             y = x.get(x.list()[-1])
         
-        try:
+        if y.state() == 'offline':
             for dsk in y.list_cdroms():
                 y.detach_cdrom(dsk)
             for dsk in y.list_drives():
@@ -1139,9 +1140,8 @@ if __name__ == '__main__':
             options['network'] = 'e1000'
             options['sound'] = 'hda'
             options['scsi'] = 'lsi53c895a'
+            options['floppy'] = None
             y.set_properties(options)
-        except:
-            pass
                         
         try:
             y.start()
