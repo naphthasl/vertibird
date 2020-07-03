@@ -29,7 +29,6 @@ setup(name='vertibird',
     ],
     platforms='any',
     classifiers=[
-            'Operating System :: OS Independent',
             'Intended Audience :: Developers',
             'License :: OSI Approved :: MIT License',
             'Programming Language :: Python :: 3',
