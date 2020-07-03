@@ -178,6 +178,8 @@ class Vertibird(object):
             __shared_audio = {}
             
             def disconnect(self):
+                self.connected = False
+                
                 if self.client != None:
                     del self.client
                 
@@ -192,7 +194,8 @@ class Vertibird(object):
             
             def refresh(self):
                 """
-                Refresh the display
+                Refresh the display. You don't need to call this either, it is
+                already automatically called when you run capture().
                 """
                 
                 try:
@@ -240,12 +243,17 @@ class Vertibird(object):
                     return offline_message
             
             def connect(self):
+                # You do not need to call this, it is already called when a VM
+                # starts or is detected to be online.
+                
                 self.disconnect()
                 start_time = time.time()
                 
                 while (self.client == None
                         or (time.time() - start_time) > VNC_TIMEOUT_SECS
-                    ) and (self.vmlive.state() == 'online'):
+                    ) and (self.vmlive.state(
+                        vnc_connecting = True
+                    ) == 'online'):
                         
                     try:
                         self.client = vncapi.connect('{0}:{1}'.format(
@@ -262,6 +270,8 @@ class Vertibird(object):
                         self.keyUp = self.client.keyUp
                         
                         self.capture()
+                        
+                        self.connected = True
                     except (
                             vncapi.VNCDoException,
                             TimeoutError,
@@ -275,8 +285,33 @@ class Vertibird(object):
             
             def audio_grab(self):
                 """
-                Get the virtual machine's current audio buffer. Returns a wav
-                audio stream in bytes. Might not contain any headers.
+                Get the virtual machine's current audio buffer. 
+                
+                The output is a bytearray in WAVE format. If the buffer
+                is empty, the WAVE file will be 0 seconds long as it will just
+                contain the default 44 byte large WAVE/RIFF header and nothing
+                else.
+                
+                Every time you call this, the current contents of the audio
+                buffer will be erased. This means you can essentially just
+                construct a while loop to call this function over and over
+                again and play back the output through a PyAudio stream or
+                something. Just make sure you're playing it back fast enough.
+                
+                If it takes too long for your audio playback system to
+                initialize the stream or whatever, your audio will stutter a
+                lot, and it won't sound pleasant at all. The only real way
+                around this is to have a constant stream that is only
+                initialized once, and to constantly feed it with this data
+                as fast as possible. To avoid ALSA buffer underruns, you can
+                feed the stream with pure silence whenever the VM's audio grab
+                stream returns an empty WAVE file.
+                
+                If there's a better way to do this, let me know - I have no
+                idea how any of this audio stuff works. Getting the test script
+                to work at an acceptable level of audio quality took an entire
+                day - honestly, making audio work with this project was the
+                one thing I dreaded the most.
                 """
                 
                 if self.vmlive.audiopipe != None:
@@ -288,11 +323,15 @@ class Vertibird(object):
                 else:
                     ret = bytearray()
                     
+                # Erase any headers supplied by QEMU as they are not valid
+                # WAVE/RIFF headers.
                 if (ret[:4] == b'RIFF'
                     and ret[8:12] == b'WAVE'):
                     
                     ret = ret[44:]
                     
+                # Add our own headers instead, with properly calculated length
+                # values for each subchunk.
                 blank = bytearray(BLANK_WAV_HEADER)
                 
                 blank[4:8] = (
@@ -309,6 +348,7 @@ class Vertibird(object):
             
             
             def __audio_thread(self):
+                # Automatically converts the named pipe into a shared buffer.
                 self.__shared_audio[self.vmlive.id] = bytearray()
                 
                 while True:
@@ -335,10 +375,18 @@ class Vertibird(object):
                             self.vmlive.audiopipe = None
                     else:
                         time.sleep(STATE_CHECK_CLK_SECS)
+                
+                # TODO: Make it as hard as possible for multiple instances of
+                # this thread to interfere with eachother. They should still be
+                # able to take over after the current thread dies or something
+                # though. If nothing reads from the named pipe then QEMU will
+                # halt. I think. Or atleast, that's how it's "supposed" to act
+                # according to the way named pipes work.
             
             def __init__(self, vmlive):
                 self.vmlive = vmlive
                 self.client = None
+                self.connected = False
                 self.disconnect()
                 self.shape = (640, 480)
                 
@@ -971,7 +1019,7 @@ class Vertibird(object):
             else:
                 raise self.InvalidStateChange('Invalid state for stop()!')
             
-        def state(self) -> str:
+        def state(self, vnc_connecting: bool = False) -> str:
             """
             Return the current state of this virtual machine.
             
@@ -985,6 +1033,9 @@ class Vertibird(object):
             
             if self.db_object.state != 'offline':
                 self.audiopipe = self.db_object.audiopipe
+                
+                if self.display.connected == False and not vnc_connecting:
+                    self.display.connect()
             
             return self.db_object.state
             
