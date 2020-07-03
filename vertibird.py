@@ -434,7 +434,14 @@ class Vertibird(object):
                         self.__argescape(self.db_object.bootorder)
                     ),
                     '-cpu',
-                    self.__argescape(self.db_object.cpu),
+                    ('{0},x2apic=on,tsc-deadline=on,hypervisor=on,'
+                    + 'tsc-adjust=on,clwb=on,umip=on,stibp=on,'
+                    + 'arch-capabilities=on,ssbd=on,xsaves=on,cmp-legacy=on,'
+                    + 'perfctr-core=on,clzero=on,wbnoinvd=on,amd-ssbd=on,'
+                    + 'virt-ssbd=on,rdctl-no=on,'
+                    + 'skip-l1dfl-vmentry=on,mds-no=on').format(
+                        self.__argescape(self.db_object.cpu)
+                    ),
                     '-smp',
                     str(self.db_object.cores),
                     '-machine',
