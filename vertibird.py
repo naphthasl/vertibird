@@ -414,6 +414,8 @@ class Vertibird(object):
                 
                 arguments = [
                     self.vertibird.qemu, # PROCESS
+                    '-uuid',
+                    self.__argescape(self.id),
                     '-monitor',
                     'telnet:{0}:{1},server,nowait'.format(
                         GLOBAL_LOOPBACK,
@@ -429,6 +431,8 @@ class Vertibird(object):
                     ),
                     '-m',
                     '{0}B'.format(self.db_object.memory),
+                    '-overcommit',
+                    'mem-lock=off',
                     '-boot',
                     'order={0},menu=on'.format(
                         self.__argescape(self.db_object.bootorder)
@@ -449,12 +453,15 @@ class Vertibird(object):
                         self.__argescape(self.db_object.machine)
                     ),
                     '-enable-kvm',
+                    '-sandbox',
+                    ('on,obsolete=deny,elevateprivileges=deny,spawn=deny,' +
+                    'resourcecontrol=deny'),
                     '-object',
                     'rng-random,id=rng0,filename=/dev/urandom',
                     '-device',
                     'virtio-rng-pci,rng=rng0',
                     '-rtc',
-                    'base={0},clock=host'.format(
+                    'base={0},clock=host,driftfix=slew'.format(
                         self.__argescape(self.db_object.rtc)
                     ),
                     '-vga',
@@ -998,6 +1005,10 @@ class Vertibird(object):
             if self.db_object.state != 'offline':
                 try:
                     x = psutil.Process(self.db_object.pid)
+                    
+                    # Process ID may have been reclaimed
+                    if not (self.id in x.cmdline()):
+                        raise psutil.NoSuchProcess(self.db_object.pid)
                     
                     # Process may not immediately end
                     if x.status() == 'zombie':
