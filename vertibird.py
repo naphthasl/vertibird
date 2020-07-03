@@ -98,7 +98,8 @@ class Vertibird(object):
         self.qemu = qemu
         self.engine = create_engine(persistence, strategy='threadlocal')
         self.Base.metadata.create_all(self.engine)
-        self.db = scoped_session((sessionmaker(bind = self.engine)))()
+        self.scoped_db = scoped_session((sessionmaker(bind = self.engine)))
+        self.db = self.scoped_db()
     
     def create(self):
         """
@@ -364,7 +365,13 @@ class Vertibird(object):
                 return ret
             
             def __audio_thread(self):
-                # Automatically converts the named pipe into a shared buffer.
+                """
+                Automatically converts the named pipe into a ZMQ broadcast.
+                """
+                
+                # Each thread will need a thread-local DB session :/
+                tldb = self.__threads_get_db_object()
+                
                 while True:
                     while self.vmlive.audiopipe == None:
                         time.sleep(STATE_CHECK_CLK_SECS)
@@ -375,10 +382,13 @@ class Vertibird(object):
                     with FileLock(self.vmlive.audiopipe):
                         context = zmq.Context()
                         socket = context.socket(zmq.PUB)
-                        socket.bind('tcp://{0}:{1}'.format(
-                            GLOBAL_LOOPBACK,
-                            self.vmlive.db_object.ports['audio']
-                        ))
+                        try:
+                            socket.bind('tcp://{0}:{1}'.format(
+                                GLOBAL_LOOPBACK,
+                                tldb.ports['audio']
+                            ))
+                        except zmq.error.ZMQError:
+                            continue
                         
                         f = open(self.vmlive.audiopipe, 'rb')
                         while True:
@@ -397,12 +407,14 @@ class Vertibird(object):
                             else:
                                 break
                         
-                        f.close()
                         socket.close()
+                        f.close()
                         
                     time.sleep(STATE_CHECK_CLK_SECS)
             
             def __audio_get_thread(self):
+                tldb = self.__threads_get_db_object()
+                
                 while True:
                     try:
                         context = zmq.Context()
@@ -413,7 +425,7 @@ class Vertibird(object):
                         )
                         sub.connect('tcp://{0}:{1}'.format(
                             GLOBAL_LOOPBACK,
-                            self.vmlive.db_object.ports['audio']
+                            tldb.ports['audio']
                         ))
                         
                         while self.connected:
@@ -424,6 +436,13 @@ class Vertibird(object):
                         time.sleep(STATE_CHECK_CLK_SECS)
                     except zmq.error.Again:
                         pass
+            
+            def __threads_get_db_object(self):
+                return self.vmlive.vertibird.scoped_db().query(
+                    self.vmlive.vertibird.VertiVM
+                ).filter(
+                    self.vmlive.vertibird.VertiVM.id == self.vmlive.id
+                ).one()
             
             def __init__(self, vmlive):
                 self.vmlive = vmlive
@@ -495,6 +514,9 @@ class Vertibird(object):
                 self.stop()
             except self.InvalidStateChange:
                 pass # Already offline
+            
+            if self.display.connected:
+                self.display.disconnect()
             
             self.db_session.delete(self.db_object)
             self.db_session.commit()
@@ -1313,6 +1335,8 @@ if __name__ == '__main__':
             y = x.create()
         else:
             y = x.get(x.list()[-1])
+        
+        displaytwo = Vertibird.VertiVMLive.VMDisplay(y)
         
         if y.state() == 'offline':
             for dsk in y.list_cdroms():
