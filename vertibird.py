@@ -1220,6 +1220,12 @@ class VertibirdSpawner(object):
     instances. The reason for this is because Vertibird instances are NOT
     thread-safe, but it IS safe to use multiple instances concurrently, even
     to access the same virtual machine.
+    
+    In summary...
+    ---------------------------------------------------------------------------
+    THREAD SAFE         : NO
+    MULTI-INSTANCE SAFE : YES
+    PROCESS SAFE        : PARTIALLY (Only one process will get audio)
     """
     
     def __init__(self, *args, **kwargs):
