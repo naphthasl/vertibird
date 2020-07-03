@@ -40,7 +40,7 @@ AUDIO_CHUNKS = round(AUDIO_BLOCK_SIZE / 4)
 DEFAULT_DSIZE = 8589934592
 VNC_IMAGE_MODE = 'RGB'
 VNC_NO_SIGNAL_MESSAGE = 'Unable to retrieve frames from VNC server right now.'
-DISK_FORMAT = 'raw'
+DISK_FORMAT = 'qcow2'
 DEBUG = False
 BLANK_WAV_HEADER =\
     b'RIFF\x00\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01'\
@@ -139,6 +139,17 @@ class Vertibird(object):
                 f = open(img, 'wb')
                 f.truncate(size)
                 f.close()
+            elif DISK_FORMAT == 'qcow2':
+                command = 'qemu-img create -f qcow2 {0} {1}B'.format(
+                    shlex.quote(img),
+                    shlex.quote(str(size))
+                )
+                
+                subprocess.check_call(
+                    shlex.split(command),
+                    stdin  = subprocess.DEVNULL,
+                    stdout = subprocess.DEVNULL
+                )
             else:
                 raise self.InvalidDiskFormat('No such format: {0}'.format(
                     DISK_FORMAT
@@ -1265,7 +1276,7 @@ if __name__ == '__main__':
                 '/home/naphtha/iso/win7x86.iso'
             )
             y.create_or_attach_drive(
-                './drives/test.img',
+                './drives/test.qcow2',
                 25769803776,
                 'ahci'
             )
