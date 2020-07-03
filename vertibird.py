@@ -1268,6 +1268,8 @@ if __name__ == '__main__':
     def main(vertibird):
         global DEBUG
         DEBUG = True
+        global DISK_FORMAT
+        DISK_FORMAT = 'raw'
         
         x = vertibird
         
@@ -1288,7 +1290,7 @@ if __name__ == '__main__':
                 '/home/naphtha/iso/win7x86.iso'
             )
             y.create_or_attach_drive(
-                './drives/test.qcow2',
+                './drives/test.img',
                 25769803776,
                 'ahci'
             )
