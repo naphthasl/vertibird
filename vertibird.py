@@ -462,11 +462,15 @@ class Vertibird(object):
                             len(self.db_object.forwarding)
                         ),
                         ','.join([
-                            'hostfwd={0}:{1}:{2}-:{3}'.format(
+                            {
+                                'hostfwd': '{4}={0}:{1}:{2}-:{3}',
+                                'guestfwd': '{4}={0}:{1}:{2}'
+                            }[x['direction']].format(
                                 self.__argescape(x['protocol']),
                                 self.__argescape(x['external_ip']),
                                 self.__argescape(x['external_port']),
-                                self.__argescape(x['internal_port'])
+                                self.__argescape(x['internal_port']),
+                                self.__argescape(x['direction'])
                             ) for x in self.db_object.forwarding
                         ])
                     )
@@ -721,6 +725,7 @@ class Vertibird(object):
         def forward_port(self,
                 external_port,
                 internal_port,
+                direction: str = 'hostfwd',
                 protocol: str = 'tcp',
                 external_ip: str = '0.0.0.0'
             ) -> str:
@@ -731,7 +736,19 @@ class Vertibird(object):
             
             self.__set_option_offline()
             
+            if not (direction in 'hostfwd', 'guestfwd'):
+                raise self.InvalidArgument(
+                    'Must be either hostfwd or guestfwd. hostfwd will '    +
+                    'redirect a service running in the guest to the host ' +
+                    'and guestfwd will redirect connections made by the '  +
+                    'guest to a service running on the host network '      +
+                    'specified by external_port and external_ip. '         +
+                    'If guestfwd is chosen, the internal options are '     +
+                    'ignored.'
+                )
+            
             fwd_id = str(zlib.crc32(('-'.join([
+                direction,
                 protocol,
                 external_ip,
                 str(external_port),
@@ -749,7 +766,8 @@ class Vertibird(object):
                         'protocol': protocol,
                         'external_ip': external_ip,
                         'external_port': str(external_port),
-                        'internal_port': str(internal_port)
+                        'internal_port': str(internal_port),
+                        'direction': direction
                     },
                 ])
                 self.db_session.commit()
