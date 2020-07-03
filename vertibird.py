@@ -26,6 +26,7 @@ from sqlalchemy.ext.declarative import declarative_base
 __author__ = 'Naphtha Nepanthez'
 __version__ = '0.0.1'
 __license__ = 'MIT' # SEE LICENSE FILE
+__all__ = ['Vertibird', 'VertibirdSpawner', 'session_generator']
 
 GLOBAL_LOOPBACK = '127.0.0.1'
 QEMU_VNC_ADDS = 5900
