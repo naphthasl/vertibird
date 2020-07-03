@@ -62,6 +62,9 @@ class Vertibird(object):
     
     class IncompatibleOperatingSystem(Exception):
         pass
+        
+    class InvalidDiskFormat(Exception):
+        pass
     
     Base = declarative_base()
 
@@ -132,9 +135,14 @@ class Vertibird(object):
         contributes to the performance of Vertibird significantly!
         """
         if not os.path.isfile(img):
-            f = open(img, 'wb')
-            f.truncate(size)
-            f.close()
+            if DISK_FORMAT == 'raw':
+                f = open(img, 'wb')
+                f.truncate(size)
+                f.close()
+            else:
+                raise self.InvalidDiskFormat('No such format: {0}'.format(
+                    DISK_FORMAT
+                ))
         else:
             raise self.DriveAlreadyExists(img)
         
