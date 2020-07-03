@@ -439,7 +439,9 @@ class Vertibird(object):
                     '-vga',
                     self.__argescape(self.db_object.vga),
                     '-device',
-                    'lsi53c895a,id=scsi',
+                    '{0},id=scsi'.format(
+                        self.__argescape(self.db_object.scsi)
+                    ),
                     '-device',
                     'ahci,id=ahci',
                     '-audiodev',
@@ -470,10 +472,26 @@ class Vertibird(object):
                     )
                 ]
                 
-                if self.db_object.sound == 'ac97':
+                if self.db_object.floppy != None:
+                    if not (os.path.isfile(self.db_object.floppy)):
+                        raise LaunchDependencyMissing(self.db_object.floppy)
+                    else:
+                        arguments += [
+                            '-fda',
+                            self.__argescape(self.db_object.floppy)
+                        ]
+                        
+                if self.db_object.numa == True:
+                    arguments.append('-numa')
+                
+                if self.db_object.sound in ['ac97', 'adlib', 'sb16', 'gus']:
                     arguments += [
                         '-device',
-                        'AC97,audiodev=audioout'
+                        '{0},audiodev=audioout'.format(
+                            (lambda x: x.upper() if x == 'ac97' else x)(
+                                self.db_object.sound
+                            )
+                        )
                     ]
                 elif self.db_object.sound == 'hda':
                     arguments += [
@@ -600,6 +618,9 @@ class Vertibird(object):
                 'sound'     : self.db_object.sound    ,
                 'bootorder' : self.db_object.bootorder,
                 'network'   : self.db_object.network  ,
+                'floppy'    : self.db_object.floppy   ,
+                'numa'      : self.db_object.numa     ,
+                'scsi'      : self.db_object.scsi     ,
             }
         
         def set_properties(self, properties: dict):
@@ -609,14 +630,91 @@ class Vertibird(object):
             """
             self.__set_option_offline()
             
-            self.db_object.memory    = int(properties['memory'   ])
-            self.db_object.cores     = int(properties['cores'    ])
-            self.db_object.cpu       = str(properties['cpu'      ])
-            self.db_object.machine   = str(properties['machine'  ])
-            self.db_object.vga       = str(properties['vga'      ])
-            self.db_object.sound     = str(properties['sound'    ])
-            self.db_object.bootorder = str(properties['bootorder'])
-            self.db_object.network   = str(properties['network'  ])
+            memory    = int (properties['memory'   ])
+            cores     = int (properties['cores'    ])
+            cpu       = str (properties['cpu'      ])
+            machine   = str (properties['machine'  ])
+            vga       = str (properties['vga'      ])
+            sound     = str (properties['sound'    ])
+            bootorder = str (properties['bootorder'])
+            network   = str (properties['network'  ])
+            floppy    = str (properties['floppy'   ])
+            scsi      = str (properties['scsi'     ])
+            numa      = bool(properties['numa'     ])
+            
+            if memory < 8388608:
+                raise self.InvalidArgument('Memory allocation too low')
+            elif cores > os.cpu_count() or cores < 1:
+                raise self.InvalidArgument('Invalid core count')
+            elif not (vga in [
+                    'none', 'std', 'cirrus', 'vmware', 'qxl', 'virtio', 'xenfb'
+                ]):
+                raise self.InvalidArgument('Invalid display adapter')
+            elif not (machine in [
+                    'xenfv', 'xenpv', 'pc', 'q35', 'isapc', 'none', 'microvm'
+                ]):
+                raise self.InvalidArgument('Invalid machine type')
+            elif not (sound in ['ac97', 'hda', 'sb16', 'gus']):
+                raise self.InvalidArgument('Invalid audio adapter type')
+            elif not (network in [
+                    'e1000',
+                    'e1000-82544gc',
+                    'e1000-82545em',
+                    'e1000e',
+                    'i82550',
+                    'i82551',
+                    'i82557a',
+                    'i82557b',
+                    'i82557c',
+                    'i82558a',
+                    'i82558b',
+                    'i82559a',
+                    'i82559b',
+                    'i82559c',
+                    'i82559er',
+                    'i82562',
+                    'i82801',
+                    'ne2k_isa',
+                    'ne2k_pci',
+                    'pcnet',
+                    'rtl8139',
+                    'tulip',
+                    'usb-net',
+                    'virtio-net-pci',
+                    'virtio-net-pci-non-transitional',
+                    'virtio-net-pci-transitional',
+                    'vmxnet3'
+                ]):
+                raise self.InvalidArgument('Invalid network device type')
+            elif not (scsi in [
+                    'lsi53c895a',
+                    'am53c974',
+                    'dc390',
+                    'lsi53c810',
+                    'mptsas1068',
+                    'megasas',
+                    'megasas-gen2',
+                    'virtio-scsi-pci',
+                    'virtio-scsi-pci-non-transitional',
+                    'virtio-scsi-pci-transitional'
+                ]):
+                raise self.InvalidArgument('Invalid SCSI controller type')
+            elif (not set('abcdnp').issuperset(bootorder)):
+                raise self.InvalidArgument('Invalid boot order')
+            elif (floppy != None) and (not os.path.isfile(floppy)):
+                raise self.InvalidArgument('Invalid floppy file')
+            
+            self.db_object.memory    = memory
+            self.db_object.cores     = cores
+            self.db_object.cpu       = cpu
+            self.db_object.machine   = machine
+            self.db_object.vga       = vga
+            self.db_object.sound     = sound
+            self.db_object.bootorder = bootorder
+            self.db_object.network   = network
+            self.db_object.floppy    = floppy
+            self.db_object.scsi      = scsi
+            self.db_object.numa      = numa
             self.db_session.commit()
         
         def forward_port(self,
@@ -949,6 +1047,9 @@ class Vertibird(object):
         sound      = Column(String, default = 'hda')
         bootorder  = Column(String, default = 'cdn')
         network    = Column(String, default = 'rtl8139')
+        scsi       = Column(String, default = 'lsi53c895a')
+        floppy     = Column(String)
+        numa       = Column(Boolean, default = False)
         cdroms     = Column(PickleType, default = [])
         drives     = Column(PickleType, default = [])
         forwarding = Column(PickleType, default = [])
@@ -1035,6 +1136,8 @@ if __name__ == '__main__':
             options = y.get_properties()
             options['memory'] = 2147483648
             options['cores'] = 4
+            options['network'] = 'e1000'
+            options['sound'] = 'hda'
             y.set_properties(options)
         except:
             pass
