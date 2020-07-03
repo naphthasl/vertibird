@@ -8,6 +8,7 @@ of XML. Screw that.
 
 import shelve, threading, time, uuid, socket, subprocess, os, telnetlib, signal
 import sys, shlex, random, string, psutil, zlib, builtins, select, tempfile, io
+import ipaddress
 
 from contextlib import closing
 
@@ -462,15 +463,11 @@ class Vertibird(object):
                             len(self.db_object.forwarding)
                         ),
                         ','.join([
-                            {
-                                'hostfwd': '{4}={0}:{1}:{2}-:{3}',
-                                'guestfwd': '{4}={0}:{1}:{2}'
-                            }[x['direction']].format(
+                            'hostfwd={0}:{1}:{2}-:{3}'.format(
                                 self.__argescape(x['protocol']),
                                 self.__argescape(x['external_ip']),
                                 self.__argescape(x['external_port']),
-                                self.__argescape(x['internal_port']),
-                                self.__argescape(x['direction'])
+                                self.__argescape(x['internal_port'])
                             ) for x in self.db_object.forwarding
                         ])
                     )
@@ -725,7 +722,6 @@ class Vertibird(object):
         def forward_port(self,
                 external_port,
                 internal_port,
-                direction: str = 'hostfwd',
                 protocol: str = 'tcp',
                 external_ip: str = '0.0.0.0'
             ) -> str:
@@ -736,19 +732,18 @@ class Vertibird(object):
             
             self.__set_option_offline()
             
-            if not (direction in 'hostfwd', 'guestfwd'):
-                raise self.InvalidArgument(
-                    'Must be either hostfwd or guestfwd. hostfwd will '    +
-                    'redirect a service running in the guest to the host ' +
-                    'and guestfwd will redirect connections made by the '  +
-                    'guest to a service running on the host network '      +
-                    'specified by external_port and external_ip. '         +
-                    'If guestfwd is chosen, the internal options are '     +
-                    'ignored.'
-                )
+            protocol = protocol.lower()
+            
+            if not self.__validate_ip(external_ip):
+                raise self.InvalidArgument('Invalid external IP')
+            elif not self.__validate_port(external_port):
+                raise self.InvalidArgument('Invalid external port')
+            elif not self.__validate_port(internal_port):
+                raise self.InvalidArgument('Invalid internal port')
+            elif not (protocol in ['tcp', 'udp']):
+                raise self.InvalidArgument('Protocol must be tcp or udp.')
             
             fwd_id = str(zlib.crc32(('-'.join([
-                direction,
                 protocol,
                 external_ip,
                 str(external_port),
@@ -766,8 +761,7 @@ class Vertibird(object):
                         'protocol': protocol,
                         'external_ip': external_ip,
                         'external_port': str(external_port),
-                        'internal_port': str(internal_port),
-                        'direction': direction
+                        'internal_port': str(internal_port)
                     },
                 ])
                 self.db_session.commit()
@@ -1018,6 +1012,30 @@ class Vertibird(object):
             
             return shlex.quote(i)
             
+        def __validate_ip(self, i: str):
+            try:
+                ipaddress.ip_address(i)
+            except ValueError:
+                return False
+            else:
+                return True
+            
+        def __validate_port(self, i):
+            if '.' in str(i):
+                return False
+            
+            try:
+                i = int(i)
+            except:
+                return False
+                
+            if i > 65535:
+                return False
+            elif i < 1:
+                return False
+            else:
+                return True
+            
         def __send_monitor_command(self, command: str):
             with telnetlib.Telnet(
                 GLOBAL_LOOPBACK,
@@ -1142,6 +1160,8 @@ if __name__ == '__main__':
                 y.detach_cdrom(dsk)
             for dsk in y.list_drives():
                 y.detach_drive(dsk['path'])
+            for fwd in y.list_forwardings():
+                y.remove_forwarding(fwd['id'])
             
             y.attach_cdrom(
                 '/home/naphtha/iso/win7x86.iso'
