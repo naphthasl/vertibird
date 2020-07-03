@@ -8,7 +8,7 @@ of XML. Screw that.
 
 import shelve, threading, time, uuid, socket, subprocess, os, telnetlib, signal
 import sys, shlex, random, string, psutil, zlib, builtins, select, tempfile, io
-import ipaddress
+import ipaddress, zmq, collections
 
 from contextlib import closing
 
@@ -195,8 +195,6 @@ class Vertibird(object):
             pass
             
         class VMDisplay(object):
-            __shared_audio = {}
-            
             def disconnect(self):
                 self.connected = False
                 
@@ -336,9 +334,8 @@ class Vertibird(object):
                 
                 if self.vmlive.audiopipe != None:
                     try:
-                        ret = bytearray(self.__shared_audio[self.vmlive.id])
-                        self.__shared_audio[self.vmlive.id].clear()
-                    except KeyError:
+                        ret = bytearray(self.audio.popleft())
+                    except IndexError:
                         ret = bytearray()
                 else:
                     ret = bytearray()
@@ -368,51 +365,89 @@ class Vertibird(object):
             
             def __audio_thread(self):
                 # Automatically converts the named pipe into a shared buffer.
-                self.__shared_audio[self.vmlive.id] = bytearray()
-                
                 while True:
-                    if self.vmlive.audiopipe != None:
-                        try:
-                            # This lock is important, as it prevents
-                            # multiple processes screwing around with the
-                            # named pipe. You only need one.
-                            with FileLock(self.vmlive.audiopipe):
-                                f = open(self.vmlive.audiopipe, 'rb')
-                                
-                                # # Experimenting with os.read() instead...
-                                # p = f.read(AUDIO_BLOCK_SIZE)
-                                p = os.read(f.fileno(), AUDIO_BLOCK_SIZE)
-                                
-                                self.__shared_audio[self.vmlive.id] += p
-                                
-                                if len(
-                                        self.__shared_audio[self.vmlive.id]
-                                    ) > AUDIO_MAX_SIZE:
-                                        
-                                    self.__shared_audio[self.vmlive.id].clear()
-                        except FileNotFoundError:
-                            self.vmlive.audiopipe = None
-                    else:
+                    while self.vmlive.audiopipe == None:
                         time.sleep(STATE_CHECK_CLK_SECS)
-                
-                # TODO: Make it as hard as possible for multiple instances of
-                # this thread to interfere with eachother. They should still be
-                # able to take over after the current thread dies or something
-                # though. If nothing reads from the named pipe then QEMU will
-                # halt. I think. Or atleast, that's how it's "supposed" to act
-                # according to the way named pipes work.
+                    
+                    # This lock is important, as it prevents
+                    # multiple processes screwing around with the
+                    # named pipe. You only need one.
+                    with FileLock(self.vmlive.audiopipe):
+                        context = zmq.Context()
+                        socket = context.socket(zmq.PUB)
+                        socket.bind('tcp://{0}:{1}'.format(
+                            GLOBAL_LOOPBACK,
+                            self.vmlive.db_object.ports['audio']
+                        ))
+                        
+                        f = open(self.vmlive.audiopipe, 'rb')
+                        while True:
+                            if self.vmlive.audiopipe != None:
+                                try:
+                                    if not os.path.exists(
+                                            self.vmlive.audiopipe
+                                        ):
+                                        raise OSError('Pipe missing')
+                                    
+                                    p = os.read(f.fileno(), AUDIO_BLOCK_SIZE)
+                                    
+                                    socket.send(p)
+                                except (FileNotFoundError, OSError):
+                                    self.vmlive.audiopipe = None
+                            else:
+                                break
+                        
+                        f.close()
+                        socket.close()
+                        
+                    time.sleep(STATE_CHECK_CLK_SECS)
+            
+            def __audio_get_thread(self):
+                while True:
+                    try:
+                        context = zmq.Context()
+                        sub = context.socket(zmq.SUB)
+                        sub.setsockopt(zmq.SUBSCRIBE, b"")
+                        sub.setsockopt(
+                            zmq.RCVTIMEO, round(STATE_CHECK_CLK_SECS * 1000)
+                        )
+                        sub.connect('tcp://{0}:{1}'.format(
+                            GLOBAL_LOOPBACK,
+                            self.vmlive.db_object.ports['audio']
+                        ))
+                        
+                        while self.connected:
+                            self.audio.append(sub.recv())
+                            
+                        sub.close()
+                            
+                        time.sleep(STATE_CHECK_CLK_SECS)
+                    except zmq.error.Again:
+                        pass
             
             def __init__(self, vmlive):
                 self.vmlive = vmlive
                 self.client = None
                 self.connected = False
+                self.audio = collections.deque(
+                    maxlen = round(AUDIO_MAX_SIZE / AUDIO_BLOCK_SIZE)
+                )
                 self.disconnect()
                 self.shape = (640, 480)
                 
                 self.threads = []
+                
                 self.threads.append(
                     threading.Thread(
                         target = self.__audio_thread,
+                        daemon = True
+                    )
+                )
+                self.threads[-1].start()
+                
+                self.threads.append(
+                    threading.Thread(
+                        target = self.__audio_get_thread,
                         daemon = True
                     )
                 )
@@ -1208,7 +1243,8 @@ class Vertibird(object):
     def _new_ports(self):
         return {
             'vnc': self.__find_free_port(),
-            'monitor': self.__find_free_port()
+            'monitor': self.__find_free_port(),
+            'audio': self.__find_free_port()
         }
         
 def session_generator(*args, **kwargs):

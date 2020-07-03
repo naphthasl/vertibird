@@ -25,7 +25,8 @@ setup(name='vertibird',
         'numpy',
         'python-opencv',
         'psutil',
-        'filelock'
+        'filelock',
+        'pyzmq'
     ],
     platforms='any',
     classifiers=[
