@@ -1138,6 +1138,7 @@ if __name__ == '__main__':
             options['cores'] = 4
             options['network'] = 'e1000'
             options['sound'] = 'hda'
+            options['scsi'] = 'lsi53c895a'
             y.set_properties(options)
         except:
             pass
