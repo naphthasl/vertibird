@@ -366,7 +366,6 @@ class Vertibird(object):
                     
                 return ret
             
-            
             def __audio_thread(self):
                 # Automatically converts the named pipe into a shared buffer.
                 self.__shared_audio[self.vmlive.id] = bytearray()
@@ -1216,6 +1215,13 @@ def session_generator(*args, **kwargs):
     return (lambda: Vertibird(*args, **kwargs))
         
 class VertibirdSpawner(object):
+    """
+    This allows you to create thread-local or function-local Vertibird
+    instances. The reason for this is because Vertibird instances are NOT
+    thread-safe, but it IS safe to use multiple instances concurrently, even
+    to access the same virtual machine.
+    """
+    
     def __init__(self, *args, **kwargs):
         """
         Takes exactly the same arguments as Vertibird(), except it creates a
