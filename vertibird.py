@@ -15,6 +15,8 @@ from contextlib import closing
 from vncdotool import api as vncapi
 from PIL import Image, ImageDraw
 from filelock import Timeout, FileLock, SoftFileLock
+from dateutil.tz import tzlocal
+from datetime import datetime
 
 from sqlalchemy import create_engine
 from sqlalchemy import Column, Integer, String, PickleType, Boolean
@@ -26,7 +28,7 @@ from sqlalchemy.ext.declarative import declarative_base
 __author__ = 'Naphtha Nepanthez'
 __version__ = '0.0.1'
 __license__ = 'MIT' # SEE LICENSE FILE
-__all__ = ['Vertibird', 'VertibirdSpawner', 'session_generator']
+__all__ = ['Vertibird', 'VertibirdSpawner', 'session_generator', 'QEMUDevices']
 
 GLOBAL_LOOPBACK = '127.0.0.1'
 QEMU_VNC_ADDS = 5900
@@ -45,6 +47,84 @@ BLANK_WAV_HEADER =\
     b'RIFF\x00\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01'\
     b'\x00\x02\x00D\xac\x00\x00\x10\xb1\x02\x00\x04\x00'\
     b'\x10\x00data\x00\x00\x00\x00'
+
+class QEMUDevices(object):
+    vga = {
+        'none': 'No Graphics',
+        'std': 'Standard VGA',
+        'cirrus': 'Cirrus VGA',
+        'vmware': 'VMWare SVGA',
+        'xenfb': 'Xen Paravirtualized Framebuffer',
+        'qxl': 'QXL VGA',
+        'virtio': 'VirtIO VGA'
+    }
+    
+    machine = {
+        'none': 'Empty Machine',
+        'xenfv': 'Xen Fully-virtualized PC',
+        'xenpv': 'Xen Para-virtualized PC',
+        'pc': 'Standard PC (i440FX + PIIX, 1996)',
+        'q35': 'Standard PC (Q35 + ICH9, 2009)',
+        'isapc': 'ISA-only PC',
+        'microvm': 'microvm (i386)'
+    }
+    
+    sound = {
+        'ac97': 'Intel 82801AA AC97 Audio',
+        'hda': 'Intel HD Audio',
+        'sb16': 'Creative Sound Blaster 16',
+        'gus': 'Gravis Ultrasound GF1',
+        'adlib': 'Yamaha YM3812 (OPL2)'
+    }
+    
+    network = {
+        'e1000': 'Intel 82540EM Gigabit Ethernet',
+        'e1000-82544gc': 'Intel 82544GC Gigabit Ethernet',
+        'e1000-82545em': 'Intel 82545EM Gigabit Ethernet',
+        'e1000e': 'Intel 82574L GbE Controller',
+        'i82550': 'Intel i82550 Ethernet',
+        'i82551': 'Intel i82551 Ethernet',
+        'i82557a': 'Intel i82557A Ethernet',
+        'i82557b': 'Intel i82557B Ethernet',
+        'i82557c': 'Intel i82557C Ethernet',
+        'i82558a': 'Intel i82558A Ethernet',
+        'i82558b': 'Intel i82558B Ethernet',
+        'i82559a': 'Intel i82559A Ethernet',
+        'i82559b': 'Intel i82559B Ethernet',
+        'i82559c': 'Intel i82559C Ethernet',
+        'i82559er': 'Intel i82559ER Ethernet',
+        'i82562': 'Intel i82562 Ethernet',
+        'i82801': 'Intel i82801 Ethernet',
+        'ne2k_isa': 'NE2000 ISA',
+        'ne2k_pci': 'NE2000 PCI',
+        'pcnet': 'PCNet-FAST III',
+        'rtl8139': 'Realtek Semiconductor Corp RTL8139 Ethernet',
+        'tulip': 'Generic Tulip PCI NIC',
+        'virtio-net-pci': 'VirtIO Ethernet PCI',
+        'virtio-net-pci-non-transitional': 'VirtIO Non-Transitional NIC PCI',
+        'virtio-net-pci-transitional': 'VirtIO Transitional NIC PCI',
+        'vmxnet3': 'VMWare Paravirtualized Ethernet v3'
+    }
+    
+    scsi = {
+        'lsi53c895a': 'LSILogic SCSI to PCI LSI53C895A',
+        'am53c974': 'AMD Am53c974 PCscsi-PCI SCSI adapter',
+        'dc390': 'Tekram DC-390 SCSI adapter',
+        'lsi53c810': 'NCR/Symbios/LSI Logic 53C810 PCI SCSI host adapter',
+        'mptsas1068': 'LSI SAS 1068',
+        'megasas': 'LSI MegaRAID SAS 1078',
+        'megasas-gen2': 'LSI MegaRAID SAS 2108',
+        'virtio-scsi-pci': 'VirtIO SCSI PCI',
+        'virtio-scsi-pci-non-transitional': 'VirtIO SCSI Non-Transitional',
+        'virtio-scsi-pci-transitional': 'VirtIO SCSI Transitional'
+    }
+    
+    rtc = {
+        'utc': 'UTC Host Clock',
+        'localtime': 'Localtime Host Clock ({0})'.format(
+            datetime.now(tzlocal()).tzname()
+        )
+    }
 
 class Vertibird(object):
     """
@@ -826,69 +906,31 @@ class Vertibird(object):
             numa      = bool(properties['numa'     ])
             rtc       = str (properties['rtc'      ])
             
+            # So apparently assertions can be removed in production use or
+            # whatever, so I have to do this horrible mess instead. Is this
+            # really what you wanted? Do you have any idea how much better a
+            # bunch of assertions would've looked compared to THIS?! Who the
+            # hell thought assertions ought to be expendable...
             if memory < 8388608:
                 raise self.InvalidArgument('Memory allocation too low')
             elif cores > os.cpu_count() or cores < 1:
                 raise self.InvalidArgument('Invalid core count')
-            elif not (vga in [
-                    'none', 'std', 'cirrus', 'vmware', 'qxl', 'virtio', 'xenfb'
-                ]):
+            elif not (vga in QEMUDevices.vga.keys()):
                 raise self.InvalidArgument('Invalid display adapter')
-            elif not (machine in [
-                    'xenfv', 'xenpv', 'pc', 'q35', 'isapc', 'none', 'microvm'
-                ]):
+            elif not (machine in QEMUDevices.machine.keys()):
                 raise self.InvalidArgument('Invalid machine type')
-            elif not (sound in ['ac97', 'hda', 'sb16', 'gus']):
+            elif not (sound in QEMUDevices.sound.keys()):
                 raise self.InvalidArgument('Invalid audio adapter type')
-            elif not (network in [
-                    'e1000',
-                    'e1000-82544gc',
-                    'e1000-82545em',
-                    'e1000e',
-                    'i82550',
-                    'i82551',
-                    'i82557a',
-                    'i82557b',
-                    'i82557c',
-                    'i82558a',
-                    'i82558b',
-                    'i82559a',
-                    'i82559b',
-                    'i82559c',
-                    'i82559er',
-                    'i82562',
-                    'i82801',
-                    'ne2k_isa',
-                    'ne2k_pci',
-                    'pcnet',
-                    'rtl8139',
-                    'tulip',
-                    'usb-net',
-                    'virtio-net-pci',
-                    'virtio-net-pci-non-transitional',
-                    'virtio-net-pci-transitional',
-                    'vmxnet3'
-                ]):
+            elif not (network in QEMUDevices.network.keys()):
                 raise self.InvalidArgument('Invalid network device type')
-            elif not (scsi in [
-                    'lsi53c895a',
-                    'am53c974',
-                    'dc390',
-                    'lsi53c810',
-                    'mptsas1068',
-                    'megasas',
-                    'megasas-gen2',
-                    'virtio-scsi-pci',
-                    'virtio-scsi-pci-non-transitional',
-                    'virtio-scsi-pci-transitional'
-                ]):
+            elif not (scsi in QEMUDevices.scsi.keys()):
                 raise self.InvalidArgument('Invalid SCSI controller type')
             elif (not set('abcdnp').issuperset(bootorder)):
                 raise self.InvalidArgument('Invalid boot order')
             elif (floppy != None):
                 if (not os.path.isfile(floppy)) or (type(floppy) != str):
                     raise self.InvalidArgument('Invalid floppy file')
-            elif not (rtc in ['utc', 'localtime']):
+            elif not (rtc in QEMUDevices.rtc.keys()):
                 raise self.InvalidArgument('Invalid RTC clock parameters')
             
             self.db_object.memory    = memory
@@ -1283,7 +1325,7 @@ class Vertibird(object):
         bootorder  = Column(String, default = 'cdn')
         network    = Column(String, default = 'rtl8139')
         scsi       = Column(String, default = 'lsi53c895a')
-        rtc        = Column(String, default = 'localtime')
+        rtc        = Column(String, default = 'utc')
         floppy     = Column(String)
         numa       = Column(Boolean, default = False)
         cdroms     = Column(PickleType, default = [])
