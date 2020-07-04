@@ -1528,7 +1528,7 @@ if __name__ == '__main__':
         global DEBUG
         DEBUG = True
         global DISK_FORMAT
-        DISK_FORMAT = 'qcow2'
+        DISK_FORMAT = 'raw'
         
         x = vertibird
         
@@ -1549,19 +1549,19 @@ if __name__ == '__main__':
                 '/home/naphtha/iso/winnt40wks_sp1_en.iso'
             )
             y.create_or_attach_drive(
-                './drives/nt40.qcow2',
-                268435456,
+                './drives/test.img',
+                25769803776,
                 'ide'
             )
             
             options = y.get_properties()
             options['machine'] = 'pc'
-            options['memory'] = 268435456
-            options['cpu'] = 'coreduo'
+            options['memory'] = 2147483648
+            options['cpu'] = 'core2duo'
             options['cores'] = 2
-            options['network'] = 'ne2k_isa'
-            options['sound'] = 'sb16'
-            options['vga'] = 'cirrus'
+            options['network'] = 'rtl8139'
+            options['sound'] = 'hda'
+            options['vga'] = 'std'
             options['scsi'] = 'lsi53c895a'
             options['floppy'] = None
             y.set_properties(options)
@@ -1615,6 +1615,8 @@ if __name__ == '__main__':
         threading.Thread(
             target = logplay, args = (log,), daemon = True
         ).start()
+        
+        time.sleep(1)
         
         """
         while y.state() == 'online':
