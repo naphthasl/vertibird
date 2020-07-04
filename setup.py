@@ -30,6 +30,7 @@ setup(name='vertibird',
         'python-dateutil'
     ],
     platforms='any',
+    python_requires='>=3.6',
     classifiers=[
             'Intended Audience :: Developers',
             'License :: OSI Approved :: MIT License',
