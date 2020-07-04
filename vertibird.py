@@ -36,7 +36,6 @@ STATE_CHECK_CLK_SECS = 0.075
 AUDIO_CLEAR_INTERVAL = 1
 AUDIO_MAX_SIZE = 524288
 AUDIO_BLOCK_SIZE = 4096
-AUDIO_CHUNKS = round(AUDIO_BLOCK_SIZE / 4)
 DEFAULT_DSIZE = 8589934592
 VNC_IMAGE_MODE = 'RGB'
 VNC_NO_SIGNAL_MESSAGE = 'Unable to retrieve frames from VNC server right now.'
@@ -196,6 +195,122 @@ class Vertibird(object):
             pass
             
         class VMDisplay(object):
+            class AudioOutput(object):
+                def read(self):
+                    """
+                    Get the virtual machine's current audio buffer. 
+                    
+                    The output is a bytearray in WAVE format. If the buffer
+                    is empty, the WAVE file will be 0 seconds long as it will
+                    just contain the default 44 byte large WAVE/RIFF header and
+                    nothing else.
+                    
+                    Every time you call this, the current contents of the audio
+                    buffer will be erased. This means you can essentially just
+                    construct a while loop to call this function over and over
+                    again and play back the output through a PyAudio stream or
+                    something. Just make sure you're playing it back fast
+                    enough.
+                    
+                    If it takes too long for your audio playback system to
+                    initialize the stream or whatever, your audio will stutter
+                    a lot, and it won't sound pleasant at all. The only real
+                    way around this is to have a constant stream that is only
+                    initialized once, and to constantly feed it with this data
+                    as fast as possible. To avoid ALSA buffer underruns, you
+                    can feed the stream with pure silence whenever the VM's
+                    audio grab stream returns an empty WAVE file.
+                    
+                    If there's a better way to do this, let me know - I have no
+                    idea how any of this audio stuff works. Getting the test
+                    script to work at an acceptable level of audio quality took
+                    an entire day - honestly, making audio work with this
+                    project was the one thing I dreaded the most.
+                    """
+                    
+                    # The output will always be padded to the block size
+                    ret = bytearray(AUDIO_BLOCK_SIZE)
+                    
+                    if self.vmlive.audiopipe != None:
+                        try:
+                            chunk = self.audio.popleft()
+                            
+                            ret[:len(chunk)] = chunk
+                        except IndexError:
+                            pass
+                        
+                    # Erase any headers supplied by QEMU as they are not valid
+                    # WAVE/RIFF headers.
+                    if (ret[:4] == b'RIFF'
+                        and ret[8:12] == b'WAVE'):
+                        
+                        ret = ret[44:]
+                        
+                    # Add our own headers instead, with properly calculated
+                    # length values for each subchunk.
+                    blank = bytearray(BLANK_WAV_HEADER)
+                    
+                    blank[4:8] = (
+                        (len(blank) + len(ret)) - 8
+                    ).to_bytes(4, byteorder='little')
+                    
+                    blank[40:44] = (
+                        len(ret)
+                    ).to_bytes(4, byteorder='little')
+                    
+                    ret = blank + ret
+                        
+                    return ret
+                
+                def close(self):
+                    self.active = False
+                
+                def __audio_get_thread(self):
+                    while self.active:
+                        try:
+                            context = zmq.Context()
+                            sub = context.socket(zmq.SUB)
+                            sub.setsockopt(zmq.SUBSCRIBE, b"")
+                            sub.setsockopt(
+                                zmq.RCVTIMEO, round(
+                                    STATE_CHECK_CLK_SECS * 1000
+                                )
+                            )
+                            sub.connect('tcp://{0}:{1}'.format(
+                                GLOBAL_LOOPBACK,
+                                self.vmlive.ports['audio']
+                            ))
+                            
+                            while self.display.connected and self.active:
+                                self.audio.append(sub.recv())
+                                
+                            sub.close()
+                                
+                            time.sleep(STATE_CHECK_CLK_SECS)
+                        except zmq.error.Again:
+                            pass
+                
+                def __del__(self):
+                    self.close()
+                
+                def __init__(self, display):
+                    self.display = display
+                    self.vmlive = self.display.vmlive
+                    self.audio = collections.deque(
+                        maxlen = round(AUDIO_MAX_SIZE / AUDIO_BLOCK_SIZE)
+                    )
+                    self.active = True
+                    
+                    self.threads = []
+            
+                    self.threads.append(
+                        threading.Thread(
+                            target = self.__audio_get_thread,
+                            daemon = True
+                        )
+                    )
+                    self.threads[-1].start()
+            
             def disconnect(self):
                 self.connected = False
                 
@@ -298,71 +413,29 @@ class Vertibird(object):
                             builtins.AttributeError
                         ):
                         self.disconnect()
+                        
+            def getAudio(self):
+                """
+                Returns the VM's audio stream. Every time you read() it, the
+                current audio buffer gets cleared, so if you intend to stream
+                the audio to multiple places it's probably a good idea to use
+                multiple of these. If you use just one instance and read it
+                multiple times for different purposes, you'll end up with
+                audio stuttering as parts of the buffer are randomly fired into
+                different places and cleared or something. I don't know, audio
+                is confusing and hard and I don't understand it myself really.
+                
+                The AudioOutput class has the following methods:
+                    - read()
+                    - close()
+                    
+                read() takes no arguments. It will give you the current buffer
+                content in WAVE format.
+                """
+                return self.AudioOutput(self)
             
             def __return_none(self, *args, **kwargs):
                 return None
-            
-            def audio_grab(self):
-                """
-                Get the virtual machine's current audio buffer. 
-                
-                The output is a bytearray in WAVE format. If the buffer
-                is empty, the WAVE file will be 0 seconds long as it will just
-                contain the default 44 byte large WAVE/RIFF header and nothing
-                else.
-                
-                Every time you call this, the current contents of the audio
-                buffer will be erased. This means you can essentially just
-                construct a while loop to call this function over and over
-                again and play back the output through a PyAudio stream or
-                something. Just make sure you're playing it back fast enough.
-                
-                If it takes too long for your audio playback system to
-                initialize the stream or whatever, your audio will stutter a
-                lot, and it won't sound pleasant at all. The only real way
-                around this is to have a constant stream that is only
-                initialized once, and to constantly feed it with this data
-                as fast as possible. To avoid ALSA buffer underruns, you can
-                feed the stream with pure silence whenever the VM's audio grab
-                stream returns an empty WAVE file.
-                
-                If there's a better way to do this, let me know - I have no
-                idea how any of this audio stuff works. Getting the test script
-                to work at an acceptable level of audio quality took an entire
-                day - honestly, making audio work with this project was the
-                one thing I dreaded the most.
-                """
-                
-                if self.vmlive.audiopipe != None:
-                    try:
-                        ret = bytearray(self.audio.popleft())
-                    except IndexError:
-                        ret = bytearray()
-                else:
-                    ret = bytearray()
-                    
-                # Erase any headers supplied by QEMU as they are not valid
-                # WAVE/RIFF headers.
-                if (ret[:4] == b'RIFF'
-                    and ret[8:12] == b'WAVE'):
-                    
-                    ret = ret[44:]
-                    
-                # Add our own headers instead, with properly calculated length
-                # values for each subchunk.
-                blank = bytearray(BLANK_WAV_HEADER)
-                
-                blank[4:8] = (
-                    (len(blank) + len(ret)) - 8
-                ).to_bytes(4, byteorder='little')
-                
-                blank[40:44] = (
-                    len(ret)
-                ).to_bytes(4, byteorder='little')
-                
-                ret = blank + ret
-                    
-                return ret
             
             def __audio_thread(self):
                 """
@@ -397,7 +470,8 @@ class Vertibird(object):
                                         ):
                                         raise OSError('Pipe missing')
                                     
-                                    p = os.read(f.fileno(), AUDIO_BLOCK_SIZE)
+                                    p = f.read(AUDIO_BLOCK_SIZE)
+                                    
                                     socket.send(p)
                                 except (FileNotFoundError, OSError):
                                     self.vmlive.audiopipe = None
@@ -408,37 +482,11 @@ class Vertibird(object):
                         f.close()
                         
                     time.sleep(STATE_CHECK_CLK_SECS)
-            
-            def __audio_get_thread(self):
-                while True:
-                    try:
-                        context = zmq.Context()
-                        sub = context.socket(zmq.SUB)
-                        sub.setsockopt(zmq.SUBSCRIBE, b"")
-                        sub.setsockopt(
-                            zmq.RCVTIMEO, round(STATE_CHECK_CLK_SECS * 1000)
-                        )
-                        sub.connect('tcp://{0}:{1}'.format(
-                            GLOBAL_LOOPBACK,
-                            self.vmlive.ports['audio']
-                        ))
                         
-                        while self.connected:
-                            self.audio.append(sub.recv())
-                            
-                        sub.close()
-                            
-                        time.sleep(STATE_CHECK_CLK_SECS)
-                    except zmq.error.Again:
-                        pass
-            
             def __init__(self, vmlive):
                 self.vmlive = vmlive
                 self.client = None
                 self.connected = False
-                self.audio = collections.deque(
-                    maxlen = round(AUDIO_MAX_SIZE / AUDIO_BLOCK_SIZE)
-                )
                 self.disconnect()
                 self.shape = (640, 480)
                 
@@ -447,14 +495,6 @@ class Vertibird(object):
                 self.threads.append(
                     threading.Thread(
                         target = self.__audio_thread,
-                        daemon = True
-                    )
-                )
-                self.threads[-1].start()
-                
-                self.threads.append(
-                    threading.Thread(
-                        target = self.__audio_get_thread,
                         daemon = True
                     )
                 )
@@ -1385,22 +1425,20 @@ if __name__ == '__main__':
                             channels=2,
                             rate=44100,
                             output=True)
+            aud = y.display.getAudio()
             
-            silence = chr(0) * 2 * 2 * AUDIO_CHUNKS
-            while True:
-                grab = y.display.audio_grab()
+            while aud.display.connected:
+                grab = aud.read()
                 
-                if len(grab) > 44:
-                    wf = wave.open(io.BytesIO(grab))
-                    
-                    stream.write(wf.readframes(wf.getnframes()))
-                    
-                    wf.close()
-                else:
-                    stream.write(silence)
+                wf = wave.open(io.BytesIO(grab))
+                
+                stream.write(wf.readframes(wf.getnframes()))
+                
+                wf.close()
                         
             stream.stop_stream()
             stream.close()
+            aud.close()
 
         adpthread = threading.Thread(
             target = audplay, args = (y,), daemon = True
