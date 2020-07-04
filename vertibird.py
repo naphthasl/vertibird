@@ -902,7 +902,8 @@ class Vertibird(object):
                                     }[drive['type']]
                                 )
                             ]
-                            strdevices += 1
+                            if drive['type'] == 'ide':
+                                strdevices += 1
                         elif drive['type'] == 'virtio':
                             arguments += [
                                 '-drive',
@@ -921,6 +922,11 @@ class Vertibird(object):
                     else:
                         raise self.LaunchDependencyMissing(drive['path'])
                 
+                if strdevices > 2:
+                    raise self.LaunchDependencyMissing(
+                        'IDE only supports a maximum of 2 units.'
+                    )
+                
                 if DEBUG:
                     arguments.remove('-nographic')
                     arguments += [
@@ -934,6 +940,7 @@ class Vertibird(object):
                     stderr = subprocess.PIPE,
                     stdout = subprocess.PIPE
                 )
+                print(process.stderr.read())
                 
                 pid = process.pid
                 
@@ -1519,7 +1526,7 @@ if __name__ == '__main__':
                 y.remove_forwarding(fwd['id'])
             
             y.attach_cdrom(
-                '/home/naphtha/iso/winnt40wks_1381_chk.iso'
+                '/home/naphtha/iso/VMware-tools-windows-11.1.0-16036546.iso'
             )
             y.create_or_attach_drive(
                 './drives/nt40.qcow2',
