@@ -30,7 +30,7 @@ __version__ = '0.0.1'
 __license__ = 'MIT' # SEE LICENSE FILE
 __all__ = [
     'Vertibird',
-    'VertibirdSpawner',
+    'SessionManager',
     'session_generator',
     'QEMUDevices',
     'Exceptions'
@@ -1517,7 +1517,7 @@ class Vertibird(object):
 def session_generator(*args, **kwargs):
     return (lambda: Vertibird(*args, **kwargs))
         
-class VertibirdSpawner(object):
+class SessionManager(object):
     """
     This allows you to create thread-local or function-local Vertibird
     instances. The reason for this is because Vertibird instances are NOT
@@ -1583,7 +1583,7 @@ if __name__ == '__main__':
     import wave
     import queue
     
-    vspawner = VertibirdSpawner()
+    vspawner = SessionManager()
     local = vspawner.local
 
     def main():
