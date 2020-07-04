@@ -940,7 +940,6 @@ class Vertibird(object):
                     stderr = subprocess.PIPE,
                     stdout = subprocess.PIPE
                 )
-                print(process.stderr.read())
                 
                 pid = process.pid
                 
@@ -1526,7 +1525,7 @@ if __name__ == '__main__':
                 y.remove_forwarding(fwd['id'])
             
             y.attach_cdrom(
-                '/home/naphtha/iso/VMware-tools-windows-11.1.0-16036546.iso'
+                '/home/naphtha/iso/VMware-tools-windows-3.5.0-110268.iso'
             )
             y.create_or_attach_drive(
                 './drives/nt40.qcow2',
@@ -1537,11 +1536,11 @@ if __name__ == '__main__':
             options = y.get_properties()
             options['machine'] = 'pc'
             options['memory'] = 268435456
-            options['cpu'] = '486'
-            options['cores'] = 1
+            options['cpu'] = 'coreduo'
+            options['cores'] = 2
             options['network'] = 'ne2k_isa'
             options['sound'] = 'sb16'
-            options['vga'] = 'vmware'
+            options['vga'] = 'cirrus'
             options['scsi'] = 'lsi53c895a'
             options['floppy'] = None
             y.set_properties(options)
