@@ -815,7 +815,9 @@ class Vertibird(object):
                 
                 if self.db_object.floppy != None:
                     if not (os.path.isfile(self.db_object.floppy)):
-                        raise self.LaunchDependencyMissing(self.db_object.floppy)
+                        raise self.LaunchDependencyMissing(
+                            self.db_object.floppy
+                        )
                     else:
                         arguments += [
                             '-fda',
