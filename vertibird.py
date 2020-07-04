@@ -11,7 +11,9 @@ taken an infinitely longer amount of time to write this for Windows, since it
 makes use of features such as named pipes.
 
 PyPi: https://pypi.org/project/vertibird/
+
 GitHub & Further Information: https://github.com/naphthasl/vertibird
+
 License: MIT (see LICENSE for details)
 """
 
@@ -35,7 +37,7 @@ from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.ext.declarative import declarative_base
 
 __author__ = 'Naphtha Nepanthez'
-__version__ = '0.0.2'
+__version__ = '0.0.3'
 __license__ = 'MIT' # SEE LICENSE FILE
 __all__ = [
     'Vertibird',
