@@ -402,12 +402,17 @@ class Vertibird(object):
                                     STATE_CHECK_CLK_SECS * 1000
                                 )
                             )
+                            
+                            bindport = self.vmlive.ports['audio']
                             sub.connect('tcp://{0}:{1}'.format(
                                 GLOBAL_LOOPBACK,
-                                self.vmlive.ports['audio']
+                                bindport
                             ))
                             
                             while self.display.connected and self.active:
+                                if self.vmlive.ports['audio'] != bindport:
+                                    break
+                                
                                 self.audio.append(sub.recv())
                                 
                             sub.close()
@@ -580,15 +585,20 @@ class Vertibird(object):
                         socket = context.socket(zmq.PUB)
                         
                         try:
+                            bindport = self.vmlive.ports['audio']
                             socket.bind('tcp://{0}:{1}'.format(
                                 GLOBAL_LOOPBACK,
-                                self.vmlive.ports['audio']
+                                bindport
                             ))
-                        except zmq.error.ZMQError:
+                            
+                            f = open(self.vmlive.audiopipe, 'rb')
+                        except (zmq.error.ZMQError, FileNotFoundError):
                             continue
                         
-                        f = open(self.vmlive.audiopipe, 'rb')
                         while True:
+                            if self.vmlive.ports['audio'] != bindport:
+                                break
+                            
                             if self.vmlive.audiopipe != None:
                                 try:
                                     if not os.path.exists(
@@ -643,12 +653,12 @@ class Vertibird(object):
             self.display    = self.VMDisplay(self)
             
             # State checking stuff
-            self._state_check()
+            self.state()
             
         def __del__(self):
             # Check state on exit/delete too, just in case.
             # (Also to ensure named pipe for audio is deleted)
-            self._state_check()
+            self.state()
             
         def wait(self):
             """
@@ -961,6 +971,7 @@ class Vertibird(object):
                 self.db_object.state = 'online'
                 self.db_session.commit()
                 
+                self.state()
                 self.display.connect()
             else:
                 raise self.InvalidStateChange('Invalid state for start()!')
@@ -1288,9 +1299,11 @@ class Vertibird(object):
             
             if self.db_object.state != 'offline':
                 self.audiopipe = self.db_object.audiopipe
+                self.ports = self.db_object.ports
                 
-                if self.display.connected == False and not vnc_connecting:
-                    self.display.connect()
+                if not vnc_connecting:
+                    if self.display.connected == False:
+                        self.display.connect()
             
             return self.db_object.state
             
@@ -1497,6 +1510,27 @@ class VertibirdSpawner(object):
         
         self.vargs = args
         self.vkwargs = kwargs
+        self.instances = {}
+    
+    def __make(self):
+        thread = threading.get_ident()
+        
+        if not (thread in self.instances):
+            self.instances[thread] = session_generator(
+                *self.vargs,
+                **self.vkwargs
+            )()
+            
+        return self.instances[thread]
+    
+    def local(self):
+        """
+        Return a thread-local instance of Vertibird. Can be used like this...
+        
+        x = VertibirdSpawner()
+        virtualmachine = x.local().get('uuid-uuid-uuid-uuid')
+        """
+        return self.__make()
     
     def vsession(self, func):
         """
@@ -1507,10 +1541,7 @@ class VertibirdSpawner(object):
         """
         
         def wrapper(*args, **kwargs):
-            kwargs['vertibird'] = session_generator(
-                *self.vargs,
-                **self.vkwargs
-            )()
+            kwargs['vertibird'] = self.__make()
             
             return func(*args, **kwargs)
             
@@ -1524,15 +1555,15 @@ if __name__ == '__main__':
     import queue
     
     vspawner = VertibirdSpawner()
-    
-    @vspawner.vsession
-    def main(vertibird):
+    local = vspawner.local
+
+    def main():
         global DEBUG
         DEBUG = True
         global DISK_FORMAT
         DISK_FORMAT = 'raw'
         
-        x = vertibird
+        x = local()
         
         if len(x.list()) < 1:
             y = x.create()
@@ -1569,7 +1600,8 @@ if __name__ == '__main__':
             y.set_properties(options)
                         
         try:
-            y.start()
+            # This tests if multi-processing is alright
+            Vertibird().get(y.id).start()
         except Vertibird.VertiVMLive.InvalidStateChange:
             print('VM already running')
         
@@ -1581,7 +1613,8 @@ if __name__ == '__main__':
             y.display.capture().convert('RGB')
         ), cv2.COLOR_RGB2BGR))
         
-        def audplay(y):
+        def audplay(local, vmid):
+            y = local().get(vmid)
             p = pyaudio.PyAudio()
             stream = p.open(format=8,
                             channels=2,
@@ -1589,7 +1622,7 @@ if __name__ == '__main__':
                             output=True)
             aud = y.display.getAudio()
             
-            while aud.display.connected:
+            while y.state():
                 grab = aud.read()
                 
                 wf = wave.open(io.BytesIO(grab))
@@ -1611,7 +1644,7 @@ if __name__ == '__main__':
                 sys.stdout.write(line)
 
         threading.Thread(
-            target = audplay, args = (y,), daemon = True
+            target = audplay, args = (local, y.id), daemon = True
         ).start()
         
         threading.Thread(
