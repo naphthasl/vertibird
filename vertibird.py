@@ -54,19 +54,14 @@ class QEMUDevices(object):
         'std': 'Standard VGA',
         'cirrus': 'Cirrus VGA',
         'vmware': 'VMWare SVGA',
-        'xenfb': 'Xen Paravirtualized Framebuffer',
         'qxl': 'QXL VGA',
         'virtio': 'VirtIO VGA'
     }
     
     machine = {
-        'none': 'Empty Machine',
-        'xenfv': 'Xen Fully-virtualized PC',
-        'xenpv': 'Xen Para-virtualized PC',
         'pc': 'Standard PC (i440FX + PIIX, 1996)',
         'q35': 'Standard PC (Q35 + ICH9, 2009)',
-        'isapc': 'ISA-only PC',
-        'microvm': 'microvm (i386)'
+        'isapc': 'ISA-Only PC'
     }
     
     sound = {
@@ -124,6 +119,56 @@ class QEMUDevices(object):
         'localtime': 'Localtime Host Clock ({0})'.format(
             datetime.now(tzlocal()).tzname()
         )
+    }
+    
+    cpu = {
+        'base': 'Base Processor (No features enabled)',
+        'host': 'KVM Host Processor (All supported host features)',
+        'max': 'KVM Max Processor (All supported accelerator features)',
+        'qemu64': 'x86_64 QEMU Virtual CPU version 2.5+',
+        'qemu32': 'x86 QEMU Virtual CPU version 2.5+',
+        'phenom': 'AMD Phenom(tm) 9550 Quad-Core Processor',
+        'pentium3': 'Intel Pentium 3',
+        'pentium2': 'Intel Pentium 2',
+        'pentium': 'Intel Pentium',
+        'n270': 'Intel(R) Atom(TM) CPU N270 @ 1.60GHz',
+        'kvm64': 'Common KVM Processor',
+        'kvm32': 'Common 32-bit KVM Processor',
+        'coreduo': 'Genuine Intel(R) CPU T2600 @ 2.16GHz',
+        'core2duo': 'Intel(R) Core(TM)2 Duo CPU T7700 @ 2.40GHz',
+        'athlon': 'AMD Athlon V1/QEMU Virtual CPU 2.5+',
+        'Westmere-IBRS': 'Westmere E56xx/L56xx/X56xx (IBRS update)',
+        'Westmere': 'Westmere E56xx/L56xx/X56xx (Nehalem-C)',
+        'Snowridge': 'Intel Atom Processor (SnowRidge)',
+        'SandyBridge': 'Intel Xeon E312xx (Sandy Bridge)',
+        'SandyBridge-IBRS': 'Intel Xeon E312xx (Sandy Bridge, IBRS update)',
+        'Penryn': 'Intel Core 2 Duo P9xxx (Penryn Class Core 2)',
+        'Opteron_G5': 'AMD Opteron 63xx class CPU',
+        'Opteron_G4': 'AMD Opteron 62xx class CPU',
+        'Opteron_G3': 'AMD Opteron 23xx class CPU',
+        'Opteron_G2': 'AMD Opteron 22xx class CPU',
+        'Opteron_G1': 'AMD Opteron 240 class CPU',
+        'Nehalem': 'Intel Core i7 9xx (Nehalem Class Core i7)',
+        'Nehalem-IBRS': 'Intel Core i7 9xx (Nehalem Core i7, IBRS update)',
+        'KnightsMill': 'Intel Xeon Phi Processor (Knights Mill)',
+        'IvyBridge': 'Intel Xeon E3-12xx v2 (Ivy Bridge)',
+        'IvyBridge-IBRS': 'Intel Xeon E3-12xx v2 (Ivy Bridge, IBRS)',
+        'Haswell': 'Intel Core Processor (Haswell)',
+        'Haswell-IBRS': 'Intel Core Processor (Haswell, IBRS)',
+        'Haswell-noTSX': 'Intel Core Processor (Haswell, no TSX)',
+        'Haswell-noTSX-IBRS': 'Intel Core Processor (Haswell, no TSX, IBRS)',
+        'EPYC': 'AMD EPYC Processor',
+        'EPYC-IBPB': 'AMD EPYC Processor (with IBPB)',
+        'Dhyana': 'Hygon Dhyana Processor',
+        'Denverton': 'Intel Atom Processor (Denverton)',
+        'Conroe': 'Intel Celeron_4x0 (Conroe/Merom Class Core 2)',
+        'Cascadelake-Server': 'Intel Xeon Processor (Cascadelake,+TSX)',
+        'Cascadelake-Server-noTSX': 'Intel Xeon Processor (Cascadelake,-TSX)',
+        'Broadwell': 'Intel Core Processor (Broadwell)',
+        'Broadwell-noTSX': 'Intel Core Processor (Broadwell,-TSX)',
+        'Broadwell-IBRS': 'Intel Core Processor (Broadwell,+IBRS)',
+        'Broadwell-noTSX-IBRS': 'Intel Core Processor (Broadwell,-TSX,+IBRS)',
+        '486': 'Intel 486 Processor'
     }
 
 class Vertibird(object):
@@ -671,12 +716,7 @@ class Vertibird(object):
                         self.__argescape(self.db_object.bootorder)
                     ),
                     '-cpu',
-                    ('{0},x2apic=on,tsc-deadline=on,hypervisor=on,'
-                    + 'tsc-adjust=on,clwb=on,umip=on,stibp=on,'
-                    + 'arch-capabilities=on,ssbd=on,xsaves=on,cmp-legacy=on,'
-                    + 'perfctr-core=on,clzero=on,wbnoinvd=on,amd-ssbd=on,'
-                    + 'virt-ssbd=on,rdctl-no=on,'
-                    + 'skip-l1dfl-vmentry=on,mds-no=on').format(
+                    ('{0}').format(
                         self.__argescape(self.db_object.cpu)
                     ),
                     '-smp',
@@ -689,30 +729,16 @@ class Vertibird(object):
                     '-sandbox',
                     ('on,obsolete=deny,elevateprivileges=deny,spawn=deny,' +
                     'resourcecontrol=deny'),
-                    '-object',
-                    'rng-random,id=rng0,filename=/dev/urandom',
-                    '-device',
-                    'virtio-rng-pci,rng=rng0',
                     '-rtc',
                     'base={0},clock=host,driftfix=slew'.format(
                         self.__argescape(self.db_object.rtc)
                     ),
                     '-vga',
                     self.__argescape(self.db_object.vga),
-                    '-device',
-                    '{0},id=scsi'.format(
-                        self.__argescape(self.db_object.scsi)
-                    ),
-                    '-device',
-                    'ahci,id=ahci',
                     '-audiodev',
                     'wav,path={0},id=audioout'.format(
                         self.__argescape(self.db_object.audiopipe)
                     ),
-                    '-device',
-                    'piix3-usb-uhci,id=usb',
-                    '-device',
-                    'usb-tablet,id=input0',
                     '-device',
                     '{0},netdev=net0'.format(
                         self.__argescape(self.db_object.network)
@@ -733,9 +759,54 @@ class Vertibird(object):
                     )
                 ]
                 
+                if self.db_object.machine != 'isapc':
+                    arguments += [
+                        '-device',
+                        '{0},id=usb'.format(
+                            {
+                                'pc': 'piix3-usb-uhci',
+                                'q35': 'ich9-usb-uhci1'
+                            }[self.db_object.machine]
+                        ),
+                        '-device',
+                        'usb-tablet,id=input0',
+                        '-device',
+                        '{0},id=scsi'.format(
+                            self.__argescape(self.db_object.scsi)
+                        ),
+                        '-device',
+                        '{0},id=ahci'.format(
+                            {
+                                'pc': 'ahci',
+                                'q35': 'ich9-ahci'
+                            }[self.db_object.machine]
+                        ),
+                        '-object',
+                        'rng-random,id=rng0,filename=/dev/urandom',
+                        '-device',
+                        'virtio-rng-pci,rng=rng0'
+                    ]
+                else:
+                    if not (self.db_object.sound in ['adlib', 'sb16', 'gus']):
+                        raise self.InvalidGenericDeviceType(
+                            'ISA-Only PC requires an ISA-specific audio device'
+                        )
+                    elif not (self.db_object.network in ['ne2k_isa']):
+                        raise self.InvalidGenericDeviceType(
+                            'ISA-Only PC requires an ISA-specific NIC device'
+                        )
+                    elif not (self.db_object.vga in ['vga', 'cirrus']):
+                        raise self.InvalidGenericDeviceType(
+                            'ISA-Only PC requires an ISA-specific VGA device'
+                        )
+                    elif self.db_object.cores > 1:
+                        raise self.InvalidGenericDeviceType(
+                            'ISA-Only PC can only support 1 core'
+                        )
+                
                 if self.db_object.floppy != None:
                     if not (os.path.isfile(self.db_object.floppy)):
-                        raise LaunchDependencyMissing(self.db_object.floppy)
+                        raise self.LaunchDependencyMissing(self.db_object.floppy)
                     else:
                         arguments += [
                             '-fda',
@@ -757,12 +828,17 @@ class Vertibird(object):
                 elif self.db_object.sound == 'hda':
                     arguments += [
                         '-device',
-                        'intel-hda,id=hda',
+                        '{0},id=hda'.format(
+                            {
+                                'pc': 'intel-hda',
+                                'q35': 'ich9-intel-hda'
+                            }[self.db_object.machine]
+                        ),
                         '-device',
                         'hda-output,id=hda-codec,audiodev=audioout'
                     ]
                 else:
-                    raise InvalidGenericDeviceType(
+                    raise self.InvalidGenericDeviceType(
                         'Audio device type must be either ac97 or hda.'
                     )
                 
@@ -786,12 +862,20 @@ class Vertibird(object):
                         ]
                         strdevices += 1
                     else:
-                        raise LaunchDependencyMissing(cdrom)
+                        raise self.LaunchDependencyMissing(cdrom)
                         
                 for key, drive in enumerate(self.db_object.drives):
                     internal_id = self.__random_device_id()
                     
                     if os.path.isfile(drive['path']):
+                        if (
+                                self.db_object.machine == 'isapc'
+                                and drive['type'] != 'ide'
+                            ):
+                            raise self.InvalidGenericDeviceType(
+                                'Only IDE devices are supported on ISA-Only PC'
+                            )
+                        
                         if drive['type'] in ['ahci', 'ide', 'scsi']:
                             arguments += [
                                 '-drive',
@@ -831,11 +915,11 @@ class Vertibird(object):
                                 )
                             ]
                         else:
-                            raise InvalidGenericDeviceType(
+                            raise self.InvalidGenericDeviceType(
                                 'Drive type must be virtio, scsi, ahci or ide.'
                             )
                     else:
-                        raise LaunchDependencyMissing(drive['path'])
+                        raise self.LaunchDependencyMissing(drive['path'])
                 
                 if DEBUG:
                     arguments.remove('-nographic')
@@ -850,7 +934,7 @@ class Vertibird(object):
                     stderr = subprocess.PIPE,
                     stdout = subprocess.PIPE
                 )
-
+                
                 pid = process.pid
                 
                 self.db_object.handles = (
@@ -932,6 +1016,8 @@ class Vertibird(object):
                     raise self.InvalidArgument('Invalid floppy file')
             elif not (rtc in QEMUDevices.rtc.keys()):
                 raise self.InvalidArgument('Invalid RTC clock parameters')
+            elif not (cpu in QEMUDevices.cpu.keys()):
+                raise self.InvalidArgument('Invalid processor')
             
             self.db_object.memory    = memory
             self.db_object.cores     = cores
@@ -1025,7 +1111,7 @@ class Vertibird(object):
             self.__set_option_offline()
             
             if not os.path.isfile(iso):
-                raise LaunchDependencyMissing(iso)
+                raise self.LaunchDependencyMissing(iso)
             
             if not (iso in self.db_object.cdroms):
                 # Weird appending is required to trigger dirty state
@@ -1075,7 +1161,7 @@ class Vertibird(object):
                 raise self.InvalidDriveType('No such type {0}.'.format(dtype))
                 
             if not os.path.isfile(img):
-                raise LaunchDependencyMissing(img)
+                raise self.LaunchDependencyMissing(img)
                 
             if not (img in list(map(
                     lambda x: x['path'],
@@ -1123,8 +1209,8 @@ class Vertibird(object):
             
             if not os.path.isfile(img):
                 self.vertibird.create_drive(img, size)
-            else:
-                self.attach_drive(img, dtype)
+
+            self.attach_drive(img, dtype)
         
         def signal_shutdown(self):
             """
@@ -1415,7 +1501,7 @@ if __name__ == '__main__':
         global DEBUG
         DEBUG = True
         global DISK_FORMAT
-        DISK_FORMAT = 'raw'
+        DISK_FORMAT = 'qcow2'
         
         x = vertibird
         
@@ -1433,19 +1519,22 @@ if __name__ == '__main__':
                 y.remove_forwarding(fwd['id'])
             
             y.attach_cdrom(
-                '/home/naphtha/iso/win7x86.iso'
+                '/home/naphtha/iso/winnt40wks_1381_chk.iso'
             )
             y.create_or_attach_drive(
-                './drives/test.img',
-                25769803776,
-                'ahci'
+                './drives/nt40.qcow2',
+                268435456,
+                'ide'
             )
             
             options = y.get_properties()
-            options['memory'] = 2147483648
-            options['cores'] = 4
-            options['network'] = 'e1000'
-            options['sound'] = 'hda'
+            options['machine'] = 'pc'
+            options['memory'] = 268435456
+            options['cpu'] = '486'
+            options['cores'] = 1
+            options['network'] = 'ne2k_isa'
+            options['sound'] = 'sb16'
+            options['vga'] = 'vmware'
             options['scsi'] = 'lsi53c895a'
             options['floppy'] = None
             y.set_properties(options)
