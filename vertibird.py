@@ -1295,19 +1295,11 @@ class Vertibird(object):
                 The current VM state, can be "offline" or "online"
             """
             
-            self._state_check()
-            
-            if self.db_object.state != 'offline':
-                self.audiopipe = self.db_object.audiopipe
-                self.ports = self.db_object.ports
-                
-                if not vnc_connecting:
-                    if self.display.connected == False:
-                        self.display.connect()
+            self._state_check(vnc_connecting)
             
             return self.db_object.state
             
-        def _state_check(self):
+        def _state_check(self, vnc_connecting: bool = False):
             # Check if QEMU instance is actually still running
             if self.db_object.state != 'offline':
                 try:
@@ -1323,7 +1315,18 @@ class Vertibird(object):
                         
                         raise psutil.NoSuchProcess(self.db_object.pid)
                 except psutil.NoSuchProcess:
-                    self.__mark_offline()
+                    pass
+                else:
+                    self.audiopipe = self.db_object.audiopipe
+                    self.ports = self.db_object.ports
+                    
+                    if not vnc_connecting:
+                        if self.display.connected == False:
+                            self.display.connect()
+                    
+                    return
+            
+            self.__mark_offline()
             
         def __mark_offline(self):
             self.__file_cleanup()
@@ -1344,7 +1347,7 @@ class Vertibird(object):
             
             try:
                 os.remove(self.db_object.audiopipe)
-            except FileNotFoundError:
+            except (FileNotFoundError, TypeError):
                 pass # Already removed by something, perhaps a reboot
             
         def __argescape(self, i: str):
