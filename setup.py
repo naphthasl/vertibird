@@ -10,7 +10,7 @@ import vertibird
 
 setup(name='vertibird',
     version=vertibird.__version__,
-    description='A really, really simple Python virtualization module which interfaces directly with QEMU. Screw using libvirt.',
+    description='A really, really simple Python virtualization module which interfaces directly with QEMU.',
     long_description=vertibird.__doc__,
     long_description_content_type="text/markdown",
     author=vertibird.__author__,

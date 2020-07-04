@@ -4,6 +4,15 @@ Vertibird is a dead-simple virtualization library based around direct access to
 QEMU. Because I couldn't be bothered to figure out how the hell the crappy
 libvirt C bindings work. I also couldn't be bothered to write a million lines
 of XML. Screw that.
+
+Currently only tested on x86_64, and probably only works on x86_64. Usage is
+also only possible on Linux, this library is NOT cross-platform. It would've
+taken an infinitely longer amount of time to write this for Windows, since it
+makes use of features such as named pipes.
+
+PyPi: https://pypi.org/project/vertibird/
+GitHub & Further Information: https://github.com/naphthasl/vertibird
+License: MIT (see LICENSE for details)
 """
 
 import shelve, threading, time, uuid, socket, subprocess, os, telnetlib, signal
