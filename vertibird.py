@@ -28,7 +28,13 @@ from sqlalchemy.ext.declarative import declarative_base
 __author__ = 'Naphtha Nepanthez'
 __version__ = '0.0.1'
 __license__ = 'MIT' # SEE LICENSE FILE
-__all__ = ['Vertibird', 'VertibirdSpawner', 'session_generator', 'QEMUDevices']
+__all__ = [
+    'Vertibird',
+    'VertibirdSpawner',
+    'session_generator',
+    'QEMUDevices',
+    'Exceptions'
+]
 
 GLOBAL_LOOPBACK = '127.0.0.1'
 QEMU_VNC_ADDS = 5900
@@ -37,7 +43,7 @@ VNC_TIMEOUT_SECS = TELNET_TIMEOUT_SECS
 STATE_CHECK_CLK_SECS = 0.075
 AUDIO_CLEAR_INTERVAL = 1
 AUDIO_MAX_SIZE = 524288
-MAX_LOG_SIZE = 524288
+MAX_LOG_SIZE = 8192
 AUDIO_BLOCK_SIZE = 4096
 DEFAULT_DSIZE = 8589934592
 VNC_IMAGE_MODE = 'RGB'
@@ -172,6 +178,37 @@ class QEMUDevices(object):
         '486': 'Intel 486 Processor'
     }
 
+class Exceptions(object):
+    class IncompatibleOperatingSystem(Exception):
+        pass
+        
+    class InvalidDiskFormat(Exception):
+        pass
+        
+    class DriveAlreadyExists(Exception):
+        pass
+        
+    class InvalidStateChange(Exception):
+        pass
+        
+    class LaunchDependencyMissing(Exception):
+        pass
+    
+    class InvalidDriveType(Exception):
+        pass
+        
+    class InvalidGenericDeviceType(Exception):
+        pass
+        
+    class LimitReached(Exception):
+        pass
+        
+    class VMLaunchException(Exception):
+        pass
+        
+    class InvalidArgument(Exception):
+        pass
+
 class Vertibird(object):
     """
     WARNING: Be careful with what kinds of input you feed Vertibird. Everything
@@ -184,12 +221,6 @@ class Vertibird(object):
     Just ALWAYS remember that anything you input will be converted into
     commandline arguments for QEMU.
     """
-    
-    class IncompatibleOperatingSystem(Exception):
-        pass
-        
-    class InvalidDiskFormat(Exception):
-        pass
     
     Base = declarative_base()
 
@@ -208,17 +239,13 @@ class Vertibird(object):
         persistence :
             The shelf/database to store information about created VMs in,
             defaults to sqlite:///vertibird.db
-        
-        Raises
-        ------
-        Vertibird.IncompatibleOperatingSystem
-            Raised when your OS doesn't support the stuff Vertibird needs to
-            work.
         """
         
         # Not sure if this is a good idea
         if not ('linux' in sys.platform.lower()):
-            raise IncompatibleOperatingSystem('Only Linux is supported.')
+            raise Exceptions.IncompatibleOperatingSystem(
+                'Only Linux is supported.'
+            )
         
         self.qemu = qemu
         self.engine = create_engine(persistence, strategy='threadlocal')
@@ -277,11 +304,13 @@ class Vertibird(object):
                     stdout = subprocess.DEVNULL
                 )
             else:
-                raise self.InvalidDiskFormat('No such format: {0}'.format(
-                    DISK_FORMAT
-                ))
+                raise Exceptions.InvalidDiskFormat(
+                    'No such format: {0}'.format(
+                        DISK_FORMAT
+                    )
+                )
         else:
-            raise self.DriveAlreadyExists(img)
+            raise Exceptions.DriveAlreadyExists(img)
         
     def list(self):
         """
@@ -298,28 +327,7 @@ class Vertibird(object):
     def __wrap_live(self, db_object):
         return self.VertiVMLive(self, self.db, db_object)
     
-    class DriveAlreadyExists(Exception):
-        pass
-    
     class VertiVMLive(object):
-        class InvalidStateChange(Exception):
-            pass
-            
-        class LaunchDependencyMissing(Exception):
-            pass
-        
-        class InvalidDriveType(Exception):
-            pass
-            
-        class InvalidGenericDeviceType(Exception):
-            pass
-            
-        class VMLaunchException(Exception):
-            pass
-            
-        class InvalidArgument(Exception):
-            pass
-            
         class VMDisplay(object):
             class AudioOutput(object):
                 def read(self):
@@ -807,25 +815,25 @@ class Vertibird(object):
                     ]
                 else:
                     if not (self.db_object.sound in ['adlib', 'sb16', 'gus']):
-                        raise self.InvalidGenericDeviceType(
+                        raise Exceptions.InvalidGenericDeviceType(
                             'ISA-Only PC requires an ISA-specific audio device'
                         )
                     elif not (self.db_object.network in ['ne2k_isa']):
-                        raise self.InvalidGenericDeviceType(
+                        raise Exceptions.InvalidGenericDeviceType(
                             'ISA-Only PC requires an ISA-specific NIC device'
                         )
                     elif not (self.db_object.vga in ['vga', 'cirrus']):
-                        raise self.InvalidGenericDeviceType(
+                        raise Exceptions.InvalidGenericDeviceType(
                             'ISA-Only PC requires an ISA-specific VGA device'
                         )
                     elif self.db_object.cores > 1:
-                        raise self.InvalidGenericDeviceType(
+                        raise Exceptions.InvalidGenericDeviceType(
                             'ISA-Only PC can only support 1 core'
                         )
                 
                 if self.db_object.floppy != None:
                     if not (os.path.isfile(self.db_object.floppy)):
-                        raise self.LaunchDependencyMissing(
+                        raise Exceptions.LaunchDependencyMissing(
                             self.db_object.floppy
                         )
                     else:
@@ -859,8 +867,8 @@ class Vertibird(object):
                         'hda-output,id=hda-codec,audiodev=audioout'
                     ]
                 else:
-                    raise self.InvalidGenericDeviceType(
-                        'Audio device type must be either ac97 or hda.'
+                    raise Exceptions.InvalidGenericDeviceType(
+                        'Audio device type is invalid!'
                     )
                 
                 strdevices = 0
@@ -883,7 +891,7 @@ class Vertibird(object):
                         ]
                         strdevices += 1
                     else:
-                        raise self.LaunchDependencyMissing(cdrom)
+                        raise Exceptions.LaunchDependencyMissing(cdrom)
                         
                 for key, drive in enumerate(self.db_object.drives):
                     internal_id = self.__random_device_id()
@@ -893,7 +901,7 @@ class Vertibird(object):
                                 self.db_object.machine == 'isapc'
                                 and drive['type'] != 'ide'
                             ):
-                            raise self.InvalidGenericDeviceType(
+                            raise Exceptions.InvalidGenericDeviceType(
                                 'Only IDE devices are supported on ISA-Only PC'
                             )
                         
@@ -937,14 +945,14 @@ class Vertibird(object):
                                 )
                             ]
                         else:
-                            raise self.InvalidGenericDeviceType(
+                            raise Exceptions.InvalidGenericDeviceType(
                                 'Drive type must be virtio, scsi, ahci or ide.'
                             )
                     else:
-                        raise self.LaunchDependencyMissing(drive['path'])
+                        raise Exceptions.LaunchDependencyMissing(drive['path'])
                 
                 if strdevices > 2:
-                    raise self.LaunchDependencyMissing(
+                    raise Exceptions.LimitReached(
                         'IDE only supports a maximum of 2 units.'
                     )
                 
@@ -973,8 +981,20 @@ class Vertibird(object):
                 
                 self.state()
                 self.display.connect()
+                
+                time.sleep(STATE_CHECK_CLK_SECS)
+                
+                if not (process.returncode in [None, 0]):
+                    self.state()
+                    
+                    raise Exceptions.VMLaunchException(
+                        'The virtual machine was unable to launch. ' +
+                        'Check the log for more information.'
+                    )
             else:
-                raise self.InvalidStateChange('Invalid state for start()!')
+                raise Exceptions.InvalidStateChange(
+                    'Invalid state for start()!'
+                )
         
         def get_log(self):
             """
@@ -1032,28 +1052,28 @@ class Vertibird(object):
             # bunch of assertions would've looked compared to THIS?! Who the
             # hell thought assertions ought to be expendable...
             if memory < 8388608:
-                raise self.InvalidArgument('Memory allocation too low')
+                raise Exceptions.InvalidArgument('Memory allocation too low')
             elif cores > os.cpu_count() or cores < 1:
-                raise self.InvalidArgument('Invalid core count')
+                raise Exceptions.InvalidArgument('Invalid core count')
             elif not (vga in QEMUDevices.vga.keys()):
-                raise self.InvalidArgument('Invalid display adapter')
+                raise Exceptions.InvalidArgument('Invalid display adapter')
             elif not (machine in QEMUDevices.machine.keys()):
-                raise self.InvalidArgument('Invalid machine type')
+                raise Exceptions.InvalidArgument('Invalid machine type')
             elif not (sound in QEMUDevices.sound.keys()):
-                raise self.InvalidArgument('Invalid audio adapter type')
+                raise Exceptions.InvalidArgument('Invalid audio adapter type')
             elif not (network in QEMUDevices.network.keys()):
-                raise self.InvalidArgument('Invalid network device type')
+                raise Exceptions.InvalidArgument('Invalid network device type')
             elif not (scsi in QEMUDevices.scsi.keys()):
-                raise self.InvalidArgument('Invalid SCSI controller type')
+                raise Exceptions.InvalidArgument('Invalid SCSI controller')
             elif (not set('abcdnp').issuperset(bootorder)):
-                raise self.InvalidArgument('Invalid boot order')
+                raise Exceptions.InvalidArgument('Invalid boot order')
             elif (floppy != None):
                 if (not os.path.isfile(floppy)) or (type(floppy) != str):
-                    raise self.InvalidArgument('Invalid floppy file')
+                    raise Exceptions.InvalidArgument('Invalid floppy file')
             elif not (rtc in QEMUDevices.rtc.keys()):
-                raise self.InvalidArgument('Invalid RTC clock parameters')
+                raise Exceptions.InvalidArgument('Invalid RTC clock preset')
             elif not (cpu in QEMUDevices.cpu.keys()):
-                raise self.InvalidArgument('Invalid processor')
+                raise Exceptions.InvalidArgument('Invalid processor')
             
             self.db_object.memory    = memory
             self.db_object.cores     = cores
@@ -1085,13 +1105,15 @@ class Vertibird(object):
             protocol = protocol.lower()
             
             if not self.__validate_ip(external_ip):
-                raise self.InvalidArgument('Invalid external IP')
+                raise Exceptions.InvalidArgument('Invalid external IP')
             elif not self.__validate_port(external_port):
-                raise self.InvalidArgument('Invalid external port')
+                raise Exceptions.InvalidArgument('Invalid external port')
             elif not self.__validate_port(internal_port):
-                raise self.InvalidArgument('Invalid internal port')
+                raise Exceptions.InvalidArgument('Invalid internal port')
             elif not (protocol in ['tcp', 'udp']):
-                raise self.InvalidArgument('Protocol must be tcp or udp.')
+                raise Exceptions.InvalidArgument(
+                    'Protocol must be tcp or udp.'
+                )
             
             fwd_id = str(zlib.crc32(('-'.join([
                 protocol,
@@ -1147,7 +1169,7 @@ class Vertibird(object):
             self.__set_option_offline()
             
             if not os.path.isfile(iso):
-                raise self.LaunchDependencyMissing(iso)
+                raise Exceptions.LaunchDependencyMissing(iso)
             
             if not (iso in self.db_object.cdroms):
                 # Weird appending is required to trigger dirty state
@@ -1194,10 +1216,12 @@ class Vertibird(object):
             
             dtype = dtype.lower()
             if not (dtype in ['ide', 'scsi', 'virtio', 'ahci']):
-                raise self.InvalidDriveType('No such type {0}.'.format(dtype))
+                raise Exceptions.InvalidDriveType(
+                    'No such type {0}.'.format(dtype)
+                )
                 
             if not os.path.isfile(img):
-                raise self.LaunchDependencyMissing(img)
+                raise Exceptions.LaunchDependencyMissing(img)
                 
             if not (img in list(map(
                     lambda x: x['path'],
@@ -1352,7 +1376,7 @@ class Vertibird(object):
             
         def __argescape(self, i: str):
             if any((c in set(',=!?<>~#@:;$*()[]{}&%"\'\\+')) for c in i):
-                raise self.InvalidArgument(
+                raise Exceptions.InvalidArgument(
                     ('Attempted to supply a malformed argument to QEMU! ' +
                      'String was: {0}'.format(i))
                 )
@@ -1425,11 +1449,13 @@ class Vertibird(object):
             
         def __set_option_offline(self):
             if self.state() != 'offline':
-                raise self.InvalidStateChange('Must be offline to set options')
+                raise Exceptions.InvalidStateChange(
+                    'Function requires VM to be offline'
+                )
                 
         def __check_running(self):
             if self.state() == 'offline':
-                raise self.InvalidStateChange(
+                raise Exceptions.InvalidStateChange(
                     'Function requires VM to be online'
                 )
     
@@ -1605,7 +1631,7 @@ if __name__ == '__main__':
         try:
             # This tests if multi-processing is alright
             Vertibird().get(y.id).start()
-        except Vertibird.VertiVMLive.InvalidStateChange:
+        except Exceptions.InvalidStateChange:
             print('VM already running')
         
         log = y.get_log()
