@@ -37,6 +37,7 @@ VNC_TIMEOUT_SECS = TELNET_TIMEOUT_SECS
 STATE_CHECK_CLK_SECS = 0.075
 AUDIO_CLEAR_INTERVAL = 1
 AUDIO_MAX_SIZE = 524288
+MAX_LOG_SIZE = 524288
 AUDIO_BLOCK_SIZE = 4096
 DEFAULT_DSIZE = 8589934592
 VNC_IMAGE_MODE = 'RGB'
@@ -684,6 +685,14 @@ class Vertibird(object):
             if self.state() == 'offline':
                 self.__randomize_ports()
                 
+                # Remove audio pipe file just in case it wasn't cleared
+                # automatically last time
+                if self.db_object.audiopipe != None:
+                    try:
+                        os.remove(self.db_object.audiopipe)
+                    except OSError:
+                        pass # Already removed
+                
                 self.db_object.audiopipe = tempfile.mkstemp(suffix='.wav')[1]
                 self.db_session.commit()
                 os.remove(self.db_object.audiopipe)
@@ -934,19 +943,18 @@ class Vertibird(object):
                         'gtk'
                     ]
                 
+                logfile = self.__get_fresh_log_file()
+                logfile_handle = open(logfile, 'a')
+                
                 # VM LAUNCH
                 process = subprocess.Popen(
                     arguments,
-                    stderr = subprocess.PIPE,
-                    stdout = subprocess.PIPE
+                    stderr = logfile_handle,
+                    stdout = logfile_handle
                 )
                 
                 pid = process.pid
                 
-                self.db_object.handles = (
-                    process.stderr.fileno(),
-                    process.stdout.fileno()
-                )
                 self.db_object.pid   = pid
                 self.db_object.state = 'online'
                 self.db_session.commit()
@@ -954,6 +962,15 @@ class Vertibird(object):
                 self.display.connect()
             else:
                 raise self.InvalidStateChange('Invalid state for start()!')
+        
+        def get_log(self):
+            """
+            Gets the log file's file object
+            """
+            try:
+                return open(self.db_object.log, 'r')
+            except FileNotFoundError:
+                return open(self.__get_fresh_log_file(), 'r')
         
         def get_properties(self):
             """
@@ -1223,40 +1240,37 @@ class Vertibird(object):
             Sends the shutdown signal. This is non-blocking.
             """
             
-            if self.state() != 'offline':
-                self.__send_monitor_command('system_powerdown')
-            else:
-                raise self.InvalidStateChange('Invalid state for powerdown!')
+            self.__check_running()
+            
+            self.__send_monitor_command('system_powerdown')
             
         def signal_reset(self):
             """
             Sends the reset signal. This is non-blocking.
             """
             
-            if self.state() != 'offline':
-                self.__send_monitor_command('system_reset')
-            else:
-                raise self.InvalidStateChange('Invalid state for reset!')
+            self.__check_running()
+            
+            self.__send_monitor_command('system_reset')
             
         def stop(self):
             """
             Terminates the virtual machine.
             """
             
-            if self.state() != 'offline':
-                try:
-                    self.__send_monitor_command('quit')
-                except:
-                    pass # Could not have initialized yet
-                
-                try:
-                    os.kill(self.db_object.pid, signal.SIGINT)
-                except ProcessLookupError:
-                    pass # Process does not exist
-                
-                self.__mark_offline()
-            else:
-                raise self.InvalidStateChange('Invalid state for stop()!')
+            self.__check_running()
+            
+            try:
+                self.__send_monitor_command('quit')
+            except:
+                pass # Could not have initialized yet
+            
+            try:
+                os.kill(self.db_object.pid, signal.SIGINT)
+            except ProcessLookupError:
+                pass # Process does not exist
+            
+            self.__mark_offline()
             
         def state(self, vnc_connecting: bool = False) -> str:
             """
@@ -1277,18 +1291,6 @@ class Vertibird(object):
                     self.display.connect()
             
             return self.db_object.state
-            
-        def stderr(self, *args, **kwargs):
-            if self.db_object.handles:
-                return os.fdopen(self.db_object.handles[0], *args, **kwargs)
-            else:
-                raise self.InvalidStateChange('Invalid state for stderr()!')
-            
-        def stdout(self, *args, **kwargs):
-            if self.db_object.handles:
-                return os.fdopen(self.db_object.handles[1], *args, **kwargs)
-            else:
-                raise self.InvalidStateChange('Invalid state for stdout()!')
             
         def _state_check(self):
             # Check if QEMU instance is actually still running
@@ -1376,6 +1378,19 @@ class Vertibird(object):
                 session.read_until(b'(qemu) ')
                 session.close()
             
+        def __get_fresh_log_file(self):            
+            if self.db_object.log == None:
+                self.db_object.log = tempfile.mkstemp()[1]
+            elif not os.path.isfile(self.db_object.log):
+                self.db_object.log = tempfile.mkstemp()[1]
+            elif os.path.getsize(self.db_object.log) > MAX_LOG_SIZE:
+                os.remove(self.db_object.log)
+                self.db_object.log = tempfile.mkstemp()[1]
+                
+            self.db_session.commit()
+
+            return self.db_object.log
+            
         def __randomize_ports(self):
             for x in self.db_object.ports.values():
                 if not self.vertibird._check_port_open(x):
@@ -1393,6 +1408,12 @@ class Vertibird(object):
         def __set_option_offline(self):
             if self.state() != 'offline':
                 raise self.InvalidStateChange('Must be offline to set options')
+                
+        def __check_running(self):
+            if self.state() == 'offline':
+                raise self.InvalidStateChange(
+                    'Function requires VM to be online'
+                )
     
     class VertiVM(Base):
         """
@@ -1404,7 +1425,7 @@ class Vertibird(object):
         
         id         = Column(String, primary_key=True)
         ports      = Column(PickleType)
-        handles    = Column(PickleType)
+        log        = Column(String)
         pid        = Column(Integer)
         audiopipe  = Column(String)
         state      = Column(String, default = 'offline')
@@ -1525,7 +1546,7 @@ if __name__ == '__main__':
                 y.remove_forwarding(fwd['id'])
             
             y.attach_cdrom(
-                '/home/naphtha/iso/VMware-tools-windows-3.5.0-110268.iso'
+                '/home/naphtha/iso/winnt40wks_sp1_en.iso'
             )
             y.create_or_attach_drive(
                 './drives/nt40.qcow2',
@@ -1549,6 +1570,8 @@ if __name__ == '__main__':
             y.start()
         except Vertibird.VertiVMLive.InvalidStateChange:
             print('VM already running')
+        
+        log = y.get_log()
         
         print('Start non-blocking')
         
@@ -1576,9 +1599,21 @@ if __name__ == '__main__':
             stream.stop_stream()
             stream.close()
             aud.close()
+            
+        def logplay(log):
+            while True:
+                line = log.readline()
+                if not line:
+                    time.sleep(STATE_CHECK_CLK_SECS)
+                    continue
+                sys.stdout.write(line)
 
-        adpthread = threading.Thread(
+        threading.Thread(
             target = audplay, args = (y,), daemon = True
+        ).start()
+        
+        threading.Thread(
+            target = logplay, args = (log,), daemon = True
         ).start()
         
         """
