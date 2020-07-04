@@ -1329,7 +1329,7 @@ class VertibirdSpawner(object):
     ---------------------------------------------------------------------------
     THREAD SAFE         : NO
     MULTI-INSTANCE SAFE : YES
-    PROCESS SAFE        : PARTIALLY (Only one process will get audio)
+    PROCESS SAFE        : YES
     """
     
     def __init__(self, *args, **kwargs):
