@@ -53,23 +53,21 @@ __all__ = [
 
 # TODO: Perhaps create some sort of MKV/MP4/whatever stream out of the VM's
 # video and audio output?
+# [POTENTIALLY OUT OF SCOPE]
 
 # TODO: Allow for multiple network devices, some of which may not use
 # usermode networking
 
 # TODO: Find some way to support "picky" operating systems like Mac OS
-
-# TODO: Try to find a better way to deal with the thread-safety issues caused
-# by SQLite. It's REALLY annoying. Like, a HUGE problem.
-# [PARTIALLY SOLVED]
+# [POTENTIALLY OUT OF SCOPE]
 
 # TODO: Allow mixed usage of disk formats.
+# [POTENTIALLY OUT OF SCOPE]
 
 # TODO: Support more than 2 attached IDE devices with multiple IDE buses.
 
-# TODO: General code cleanup.
-
-# TODO: Add clones and snapshots
+# TODO: Add disk cloning, although you could just copy the backing file
+# [POTENTIALLY OUT OF SCOPE]
 
 # Connection details (note: QEMU_VNC_ADDS is related to a quirk with QEMU)
 GLOBAL_LOOPBACK = '127.0.0.1'
