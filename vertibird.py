@@ -81,6 +81,8 @@ VNC_TIMEOUT_SECS = TELNET_TIMEOUT_SECS
 # Realtime state check and non-realtime state check poll times
 STATE_CHECK_CLK_SECS = 0.075
 STATE_CHECK_NRLT_CLK_SECS = 0.5
+DB_CINTERVAL = 0.2
+VNC_FRAMERATE = 60
 
 # Audio options
 AUDIO_CLEAR_INTERVAL = 1
@@ -102,11 +104,12 @@ VNC_NO_SIGNAL_MESSAGE = 'Unable to retrieve frames from VNC server right now.'
 DEBUG = False
 EXPERIMENTAL_SHARED_INSTANCES = False
 
-# Static constants
+# Module requirements
 BLANK_WAV_HEADER =\
     b'RIFF\x00\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01'\
     b'\x00\x02\x00D\xac\x00\x00\x10\xb1\x02\x00\x04\x00'\
     b'\x10\x00data\x00\x00\x00\x00'
+GLOBAL_THREAD_POOL = []
 
 class QEMUDevices(object):
     vga = {
@@ -308,11 +311,24 @@ class Vertibird(object):
             )
         
         self.qemu = qemu
-        self.engine = create_engine(persistence, strategy='threadlocal')
-        self.Base.metadata.create_all(self.engine)
-        self.scoped_db = scoped_session((sessionmaker(bind = self.engine)))
-        self.db = self.scoped_db()
+        self.db_info = persistence
+        self.db_instances = {}
         self.vm_instances = {}
+    
+    def db(self):
+        thread = threading.get_ident()
+        
+        if not (thread in self.db_instances):
+            engine = create_engine(
+                self.db_info,
+                isolation_level='READ UNCOMMITTED'
+            )
+            self.Base.metadata.create_all(engine)
+            self.db_instances[thread] = (sessionmaker(
+                bind = engine
+            ))()
+            
+        return self.db_instances[thread]
     
     def create(self):
         """
@@ -320,8 +336,8 @@ class Vertibird(object):
         access object.
         """
         x = self.VertiVM(id = str(uuid.uuid4()), ports = self._new_ports())
-        self.db.add(x)
-        self.db.commit()
+        self.db().add(x)
+        self.db().commit()
         
         return self.__wrap_live(x)
         
@@ -329,7 +345,7 @@ class Vertibird(object):
         """
         Retrieves a Vertibird.VertiVMLive object via the given UUID.
         """
-        return self.__wrap_live(self.db.query(self.VertiVM).filter(
+        return self.__wrap_live(self.db().query(self.VertiVM).filter(
             self.VertiVM.id == vmuuid
         ).one())
     
@@ -381,7 +397,7 @@ class Vertibird(object):
         return list(
             map(
                 (lambda x: x[0]),
-                self.db.query(self.VertiVM.id).all()
+                self.db().query(self.VertiVM.id).all()
             )
         )
         
@@ -390,16 +406,14 @@ class Vertibird(object):
             if not (db_object.id in self.vm_instances):
                 self.vm_instances[db_object.id] = self.VertiVMLive(
                     self,
-                    self.db,
-                    db_object
+                    db_object.id
                 )
             
             return self.vm_instances[db_object.id]
         else:
             return self.VertiVMLive(
                 self,
-                self.db,
-                db_object
+                db_object.id
             )
     
     class VertiVMLive(object):
@@ -440,13 +454,12 @@ class Vertibird(object):
                     # The output will always be padded to the block size
                     ret = bytearray(AUDIO_BLOCK_SIZE)
                     
-                    if self.vmlive.audiopipe != None:
-                        try:
-                            chunk = self.audio.popleft()
-                            
-                            ret[:len(chunk)] = chunk
-                        except IndexError:
-                            pass
+                    try:
+                        chunk = self.audio.popleft()
+                        
+                        ret[:len(chunk)] = chunk
+                    except IndexError:
+                        pass
                         
                     # Erase any headers supplied by QEMU as they are not valid
                     # WAVE/RIFF headers.
@@ -486,21 +499,20 @@ class Vertibird(object):
                                 )
                             )
                             
-                            bindport = self.vmlive.ports['audio']
+                            self.vmlive.db_session().commit()
+                            bindport = self.vmlive.db_object().ports['audio']
                             sub.connect('tcp://{0}:{1}'.format(
                                 GLOBAL_LOOPBACK,
                                 bindport
                             ))
                             
-                            while self.display.connected and self.active:
-                                if self.vmlive.ports['audio'] != bindport:
-                                    break
-                                
+                            while self.active:
                                 self.audio.append(sub.recv())
                                 
                             sub.close()
                         except zmq.error.Again:
                             pass
+                    self.vmlive.db_session().close()
                 
                 def __del__(self):
                     self.close()
@@ -538,18 +550,24 @@ class Vertibird(object):
                 
                 self.client = None
             
-            def refresh(self):
+            def refresh(self, force: bool = False):
                 """
                 Refresh the display. You don't need to call this either, it is
                 already automatically called when you run capture().
                 """
+                    
+                if not force:
+                    if (time.time() - self.frame_lease) < (1 / VNC_FRAMERATE):
+                        return
                 
                 try:
                     self.client.refreshScreen()
                 except (TimeoutError, AttributeError, builtins.AttributeError):
                     self.disconnect()
+                    
+                self.frame_lease = time.time()
             
-            def capture(self):
+            def capture(self, force: bool = False):
                 """
                 Returns a PIL image of the virtual machine display. You can
                 also interact with the VM through the following functions:
@@ -564,7 +582,7 @@ class Vertibird(object):
                     - https://vncdotool.readthedocs.io/en/latest/library.html
                 """
                 
-                self.refresh()
+                self.refresh(force = force)
                 
                 if self.client != None:
                     self.shape = self.client.screen.size
@@ -604,7 +622,7 @@ class Vertibird(object):
                     try:
                         self.client = vncapi.connect('{0}:{1}'.format(
                             GLOBAL_LOOPBACK,
-                            (self.vmlive.db_object.ports['vnc']
+                            (self.vmlive.db_object().ports['vnc']
                             - QEMU_VNC_ADDS)
                         ), password = None, timeout = VNC_TIMEOUT_SECS)
                         
@@ -615,7 +633,7 @@ class Vertibird(object):
                         self.keyDown = self.client.keyDown
                         self.keyUp = self.client.keyUp
                         
-                        self.capture()
+                        self.capture(force = True)
                         
                         self.connected = True
                     except (
@@ -648,108 +666,30 @@ class Vertibird(object):
             
             def __return_none(self, *args, **kwargs):
                 return None
-            
-            def __audio_thread(self):
-                """
-                Automatically converts the named pipe into a ZMQ broadcast.
-                """
-                
-                while self.threads['audio']['needed']:
-                    # Wait until the audio pipe is available/exists.
-                    if (self.vmlive.audiopipe == None
-                         or (not os.path.exists(str(self.vmlive.audiopipe)))   
-                        ):
-                        
-                        time.sleep(STATE_CHECK_NRLT_CLK_SECS)
-                        
-                        continue
-                    
-                    # This lock is important, as it prevents
-                    # multiple processes screwing around with the
-                    # named pipe. You only need one.
-                    ftr = str(self.vmlive.audiopipe)
-                    with FileLock(self.vmlive.audiopipe):
-                        context = zmq.Context()
-                        socket = context.socket(zmq.PUB)
-                        
-                        try:
-                            bindport = self.vmlive.ports['audio']
-                            socket.bind('tcp://{0}:{1}'.format(
-                                GLOBAL_LOOPBACK,
-                                bindport
-                            ))
-                            
-                            f = open(self.vmlive.audiopipe, 'rb')
-                        except (zmq.error.ZMQError, FileNotFoundError):
-                            continue
-                        
-                        # Can exit if:
-                        # - Port has changed
-                        # - Audio pipe has been removed from database/stopped
-                        # - Audio pipe file nolonger exists
-                        # - Reading from the pipe raised an exception
-                        while (self.vmlive.ports['audio'] == bindport
-                                and self.vmlive.audiopipe != None
-                            ):
-                                
-                            try:
-                                if not os.path.exists(
-                                        self.vmlive.audiopipe
-                                    ):
-                                    raise FileNotFoundError('Pipe missing')
-                                
-                                p = f.read(AUDIO_BLOCK_SIZE)
-                                
-                                socket.send(p)
-                            except (FileNotFoundError, OSError):
-                                self.vmlive.audiopipe = None
-                        
-                        socket.close()
-                        f.close()
-                        
-                    try:
-                        os.remove(ftr)
-                    except (FileNotFoundError, OSError, TypeError):
-                        pass # Already deleted
-                    
-                    # Upon exit, file lock is cleared and the loop waits until
-                    # the audio pipe is available again.
-                        
-            def __del__(self):
-                self.threads['audio']['needed'] = False
                         
             def __init__(self, vmlive):
                 self.vmlive = vmlive
                 self.client = None
                 self.connected = False
                 self.disconnect()
+                self.frame_lease = 0
                 self.shape = (640, 480)
-                
-                self.threads = {}
-                
-                self.threads['audio'] = {
-                    'thread': threading.Thread(
-                        target = self.__audio_thread,
-                        daemon = True
-                    ),
-                    'needed': True
-                }
-                self.threads['audio']['thread'].start()
                 
                 self.connect()
                         
-        def __init__(self, vertibird, db_session, db_object):
+        def __init__(self, vertibird, vuuid):
             """
             Don't call this directly, but know that it assigns the VMDisplay
             object to self.display. This will allow you to interact with the VM
             """
             
+            self.id         = vuuid
             self.vertibird  = vertibird
-            self.db_session = db_session
-            self.db_object  = db_object
+            self.db_session = vertibird.db
+            self.db_objects = {}
+            self.db_object  = self.__get_db_object
             self.audiopipe  = None
-            self.id         = db_object.id
-            self.ports      = db_object.ports
+            self.ports      = self.db_object().ports
             self.display    = self.VMDisplay(self)
             
             # State checking stuff
@@ -762,7 +702,51 @@ class Vertibird(object):
                 self.state()
             except:
                 pass # Already garbage collected
+
+        def __audio_thread(self):
+            """
+            Automatically converts the named pipe into a ZMQ broadcast.
+            """
+
+            while self.state(vnc_connecting = True) == 'offline':
+                time.sleep(STATE_CHECK_CLK_SECS)
+                
+                self.db_session().commit()
             
+            context = zmq.Context()
+            socket = context.socket(zmq.PUB)
+            
+            self.db_session().commit()
+            ftr = self.db_object().audiopipe
+            bindport = self.db_object().ports['audio']
+            
+            try:
+                socket.bind('tcp://{0}:{1}'.format(
+                    GLOBAL_LOOPBACK,
+                    bindport
+                ))
+                
+                f = open(ftr, 'rb')
+            except (zmq.error.ZMQError, FileNotFoundError):
+                return
+            
+            while self.state(vnc_connecting = True) != 'offline':
+                try:
+                    if not os.path.exists(
+                            ftr
+                        ):
+                        raise FileNotFoundError('Pipe missing')
+                    
+                    p = f.read(AUDIO_BLOCK_SIZE)
+                    
+                    socket.send(p)
+                except (FileNotFoundError, OSError):
+                    break
+            
+            socket.close()
+            f.close()
+            self.db_session().close()
+
         def wait(self):
             """
             Waits until this VM has been terminated.
@@ -786,8 +770,8 @@ class Vertibird(object):
             if self.display.connected:
                 self.display.disconnect()
             
-            self.db_session.delete(self.db_object)
-            self.db_session.commit()
+            self.db_session().delete(self.db_object)
+            self.db_session().commit()
             
         def start(self):
             """
@@ -800,18 +784,18 @@ class Vertibird(object):
                 
                 # Remove audio pipe file just in case it wasn't cleared
                 # automatically last time
-                if self.db_object.audiopipe != None:
+                if self.db_object().audiopipe != None:
                     try:
-                        os.remove(self.db_object.audiopipe)
+                        os.unlink(self.db_object().audiopipe)
                     except OSError:
                         pass # Already removed
                 
-                self.db_object.audiopipe = self.__get_temp(suffix = '.pipe')
+                self.db_object().audiopipe = self.__get_temp(suffix = '.pipe')
                 
-                self.db_session.commit()
-                os.remove(self.db_object.audiopipe)
-                os.mkfifo(self.db_object.audiopipe)
-                self.audiopipe = self.db_object.audiopipe
+                self.db_session().commit()
+                os.unlink(self.db_object().audiopipe)
+                os.mkfifo(self.db_object().audiopipe)
+                self.audiopipe = self.db_object().audiopipe
                 
                 arguments = [
                     self.vertibird.qemu, # PROCESS
@@ -820,7 +804,7 @@ class Vertibird(object):
                     '-monitor',
                     'telnet:{0}:{1},server,nowait'.format(
                         GLOBAL_LOOPBACK,
-                        self.db_object.ports['monitor']
+                        self.db_object().ports['monitor']
                     ),
                     '-nographic',
                     '-serial',
@@ -828,25 +812,25 @@ class Vertibird(object):
                     '-vnc',
                     '{0}:{1},share=force-shared'.format(
                         GLOBAL_LOOPBACK,
-                        self.db_object.ports['vnc'] - QEMU_VNC_ADDS
+                        self.db_object().ports['vnc'] - QEMU_VNC_ADDS
                     ),
                     '-m',
-                    '{0}B'.format(self.db_object.memory),
+                    '{0}B'.format(self.db_object().memory),
                     '-overcommit',
                     'mem-lock=off',
                     '-boot',
                     'order={0},menu=on'.format(
-                        self.__argescape(self.db_object.bootorder)
+                        self.__argescape(self.db_object().bootorder)
                     ),
                     '-cpu',
                     ('{0}').format(
-                        self.__argescape(self.db_object.cpu)
+                        self.__argescape(self.db_object().cpu)
                     ),
                     '-smp',
-                    str(self.db_object.cores),
+                    str(self.db_object().cores),
                     '-machine',
                     'type={0},accel=kvm'.format(
-                        self.__argescape(self.db_object.machine)
+                        self.__argescape(self.db_object().machine)
                     ),
                     '-enable-kvm',
                     '-sandbox',
@@ -854,22 +838,22 @@ class Vertibird(object):
                     'resourcecontrol=deny'),
                     '-rtc',
                     'base={0},clock=host,driftfix=slew'.format(
-                        self.__argescape(self.db_object.rtc)
+                        self.__argescape(self.db_object().rtc)
                     ),
                     '-vga',
-                    self.__argescape(self.db_object.vga),
+                    self.__argescape(self.db_object().vga),
                     '-audiodev',
                     'wav,path={0},id=audioout'.format(
-                        self.__argescape(self.db_object.audiopipe)
+                        self.__argescape(self.db_object().audiopipe)
                     ),
                     '-device',
                     '{0},netdev=net0'.format(
-                        self.__argescape(self.db_object.network)
+                        self.__argescape(self.db_object().network)
                     ),
                     '-netdev',
                     'user,id=net0{0}{1}'.format(
                         (lambda x: ',' if x > 0 else '')(
-                            len(self.db_object.forwarding)
+                            len(self.db_object().forwarding)
                         ),
                         ','.join([
                             'hostfwd={0}:{1}:{2}-:{3}'.format(
@@ -877,32 +861,32 @@ class Vertibird(object):
                                 self.__argescape(x['external_ip']),
                                 self.__argescape(x['external_port']),
                                 self.__argescape(x['internal_port'])
-                            ) for x in self.db_object.forwarding
+                            ) for x in self.db_object().forwarding
                         ])
                     )
                 ]
                 
-                if self.db_object.machine != 'isapc':
+                if self.db_object().machine != 'isapc':
                     arguments += [
                         '-device',
                         '{0},id=usb'.format(
                             {
                                 'pc': 'piix3-usb-uhci',
                                 'q35': 'ich9-usb-uhci1'
-                            }[self.db_object.machine]
+                            }[self.db_object().machine]
                         ),
                         '-device',
                         'usb-tablet,id=input0',
                         '-device',
                         '{0},id=scsi'.format(
-                            self.__argescape(self.db_object.scsi)
+                            self.__argescape(self.db_object().scsi)
                         ),
                         '-device',
                         '{0},id=ahci'.format(
                             {
                                 'pc': 'ahci',
                                 'q35': 'ich9-ahci'
-                            }[self.db_object.machine]
+                            }[self.db_object().machine]
                         ),
                         '-object',
                         'rng-random,id=rng0,filename=/dev/urandom',
@@ -910,54 +894,54 @@ class Vertibird(object):
                         'virtio-rng-pci,rng=rng0'
                     ]
                 else:
-                    if not (self.db_object.sound in ['adlib', 'sb16', 'gus']):
+                    if not (self.db_object().sound in ['adlib','sb16','gus']):
                         raise Exceptions.InvalidGenericDeviceType(
                             'ISA-Only PC requires an ISA-specific audio device'
                         )
-                    elif not (self.db_object.network in ['ne2k_isa']):
+                    elif not (self.db_object().network in ['ne2k_isa']):
                         raise Exceptions.InvalidGenericDeviceType(
                             'ISA-Only PC requires an ISA-specific NIC device'
                         )
-                    elif not (self.db_object.vga in ['vga', 'cirrus']):
+                    elif not (self.db_object().vga in ['vga', 'cirrus']):
                         raise Exceptions.InvalidGenericDeviceType(
                             'ISA-Only PC requires an ISA-specific VGA device'
                         )
-                    elif self.db_object.cores > 1:
+                    elif self.db_object().cores > 1:
                         raise Exceptions.InvalidGenericDeviceType(
                             'ISA-Only PC can only support 1 core'
                         )
                 
-                if self.db_object.floppy != None:
-                    if not (os.path.isfile(self.db_object.floppy)):
+                if self.db_object().floppy != None:
+                    if not (os.path.isfile(self.db_object().floppy)):
                         raise Exceptions.LaunchDependencyMissing(
-                            self.db_object.floppy
+                            self.db_object().floppy
                         )
                     else:
                         arguments += [
                             '-fda',
-                            self.__argescape(self.db_object.floppy)
+                            self.__argescape(self.db_object().floppy)
                         ]
                         
-                if self.db_object.numa == True:
+                if self.db_object().numa == True:
                     arguments.append('-numa')
                 
-                if self.db_object.sound in ['ac97', 'adlib', 'sb16', 'gus']:
+                if self.db_object().sound in ['ac97', 'adlib', 'sb16', 'gus']:
                     arguments += [
                         '-device',
                         '{0},audiodev=audioout'.format(
                             (lambda x: x.upper() if x == 'ac97' else x)(
-                                self.db_object.sound
+                                self.db_object().sound
                             )
                         )
                     ]
-                elif self.db_object.sound == 'hda':
+                elif self.db_object().sound == 'hda':
                     arguments += [
                         '-device',
                         '{0},id=hda'.format(
                             {
                                 'pc': 'intel-hda',
                                 'q35': 'ich9-intel-hda'
-                            }[self.db_object.machine]
+                            }[self.db_object().machine]
                         ),
                         '-device',
                         'hda-output,id=hda-codec,audiodev=audioout'
@@ -969,7 +953,7 @@ class Vertibird(object):
                 
                 strdevices = 0
                 
-                for key, cdrom in enumerate(self.db_object.cdroms):
+                for key, cdrom in enumerate(self.db_object().cdroms):
                     if os.path.isfile(cdrom):
                         internal_id = self.__random_device_id()
                         
@@ -989,12 +973,12 @@ class Vertibird(object):
                     else:
                         raise Exceptions.LaunchDependencyMissing(cdrom)
                         
-                for key, drive in enumerate(self.db_object.drives):
+                for key, drive in enumerate(self.db_object().drives):
                     internal_id = self.__random_device_id()
                     
                     if os.path.isfile(drive['path']):
                         if (
-                                self.db_object.machine == 'isapc'
+                                self.db_object().machine == 'isapc'
                                 and drive['type'] != 'ide'
                             ):
                             raise Exceptions.InvalidGenericDeviceType(
@@ -1071,9 +1055,9 @@ class Vertibird(object):
                 
                 pid = process.pid
                 
-                self.db_object.pid   = pid
-                self.db_object.state = 'online'
-                self.db_session.commit()
+                self.db_object().pid   = pid
+                self.db_object().state = 'online'
+                self.db_session().commit()
                 
                 self.state()
                 self.display.connect()
@@ -1097,7 +1081,7 @@ class Vertibird(object):
             Gets the log file's file object
             """
             try:
-                return open(self.db_object.log, 'r')
+                return open(self.db_object().log, 'r')
             except FileNotFoundError:
                 return open(self.__get_fresh_log_file(), 'r')
         
@@ -1108,18 +1092,18 @@ class Vertibird(object):
             and graphics adapter model.
             """
             return {
-                'memory'    : self.db_object.memory   ,
-                'cores'     : self.db_object.cores    ,
-                'cpu'       : self.db_object.cpu      ,
-                'machine'   : self.db_object.machine  ,
-                'vga'       : self.db_object.vga      ,
-                'sound'     : self.db_object.sound    ,
-                'bootorder' : self.db_object.bootorder,
-                'network'   : self.db_object.network  ,
-                'floppy'    : self.db_object.floppy   ,
-                'numa'      : self.db_object.numa     ,
-                'scsi'      : self.db_object.scsi     ,
-                'rtc'       : self.db_object.rtc      ,
+                'memory'    : self.db_object().memory   ,
+                'cores'     : self.db_object().cores    ,
+                'cpu'       : self.db_object().cpu      ,
+                'machine'   : self.db_object().machine  ,
+                'vga'       : self.db_object().vga      ,
+                'sound'     : self.db_object().sound    ,
+                'bootorder' : self.db_object().bootorder,
+                'network'   : self.db_object().network  ,
+                'floppy'    : self.db_object().floppy   ,
+                'numa'      : self.db_object().numa     ,
+                'scsi'      : self.db_object().scsi     ,
+                'rtc'       : self.db_object().rtc      ,
             }
         
         def set_properties(self, properties: dict):
@@ -1171,19 +1155,19 @@ class Vertibird(object):
             elif not (cpu in QEMUDevices.cpu.keys()):
                 raise Exceptions.InvalidArgument('Invalid processor')
             
-            self.db_object.memory    = memory
-            self.db_object.cores     = cores
-            self.db_object.cpu       = cpu
-            self.db_object.machine   = machine
-            self.db_object.vga       = vga
-            self.db_object.sound     = sound
-            self.db_object.bootorder = bootorder
-            self.db_object.network   = network
-            self.db_object.floppy    = floppy
-            self.db_object.scsi      = scsi
-            self.db_object.numa      = numa
-            self.db_object.rtc       = rtc
-            self.db_session.commit()
+            self.db_object().memory    = memory
+            self.db_object().cores     = cores
+            self.db_object().cpu       = cpu
+            self.db_object().machine   = machine
+            self.db_object().vga       = vga
+            self.db_object().sound     = sound
+            self.db_object().bootorder = bootorder
+            self.db_object().network   = network
+            self.db_object().floppy    = floppy
+            self.db_object().scsi      = scsi
+            self.db_object().numa      = numa
+            self.db_object().rtc       = rtc
+            self.db_session().commit()
         
         def forward_port(self,
                 external_port,
@@ -1220,10 +1204,10 @@ class Vertibird(object):
             
             if not (fwd_id in list(map(
                     (lambda x: x['id']),
-                    self.db_object.forwarding
+                    self.db_object().forwarding
                 ))):
                     
-                self.db_object.forwarding = (self.db_object.forwarding + [
+                self.db_object().forwarding = (self.db_object().forwarding + [
                     {
                         'id': fwd_id,
                         'protocol': protocol,
@@ -1232,7 +1216,7 @@ class Vertibird(object):
                         'internal_port': str(internal_port)
                     },
                 ])
-                self.db_session.commit()
+                self.db_session().commit()
             
             return fwd_id
             
@@ -1242,7 +1226,7 @@ class Vertibird(object):
             port forwards specified for this VM.
             """
             
-            return self.db_object.forwarding
+            return self.db_object().forwarding
             
         def remove_forwarding(self, fwd_id: str):
             """
@@ -1251,11 +1235,11 @@ class Vertibird(object):
             
             self.__set_option_offline()
             
-            self.db_object.forwarding = list(filter(
+            self.db_object().forwarding = list(filter(
                 lambda x: x['id'] != fwd_id,
-                self.db_object.forwarding
+                self.db_object().forwarding
             ))
-            self.db_session.commit()
+            self.db_session().commit()
         
         def attach_cdrom(self, iso: str):
             """
@@ -1267,10 +1251,10 @@ class Vertibird(object):
             if not os.path.isfile(iso):
                 raise Exceptions.LaunchDependencyMissing(iso)
             
-            if not (iso in self.db_object.cdroms):
+            if not (iso in self.db_object().cdroms):
                 # Weird appending is required to trigger dirty state
-                self.db_object.cdroms = (self.db_object.cdroms + [iso,])
-                self.db_session.commit()
+                self.db_object().cdroms = (self.db_object().cdroms + [iso,])
+                self.db_session().commit()
                 
         def list_cdroms(self):
             """
@@ -1278,7 +1262,7 @@ class Vertibird(object):
             ISOs attached to the VM as CD-ROM drives.
             """
             
-            return self.db_object.cdroms
+            return self.db_object().cdroms
             
         def detach_cdrom(self, iso: str):
             """
@@ -1287,12 +1271,12 @@ class Vertibird(object):
             
             self.__set_option_offline()
             
-            if (iso in self.db_object.cdroms):
-                self.db_object.cdroms = list(filter(
+            if (iso in self.db_object().cdroms):
+                self.db_object().cdroms = list(filter(
                     lambda x: x != iso,
-                    self.db_object.cdroms
+                    self.db_object().cdroms
                 ))
-                self.db_session.commit()
+                self.db_session().commit()
                 
         def attach_drive(self, img: str, dtype: str = 'ide'):
             """
@@ -1321,15 +1305,15 @@ class Vertibird(object):
                 
             if not (img in list(map(
                     lambda x: x['path'],
-                    self.db_object.drives
+                    self.db_object().drives
                 ))):
                     
-                self.db_object.drives = self.db_object.drives + [{
+                self.db_object().drives = self.db_object().drives + [{
                     'path': img,
                     'type': dtype
                 },]
                 
-                self.db_session.commit()
+                self.db_session().commit()
             
         def list_drives(self):
             """
@@ -1337,7 +1321,7 @@ class Vertibird(object):
             type of each drive attached to the virtual machine.
             """
             
-            return self.db_object.drives
+            return self.db_object().drives
             
         def detach_drive(self, img: str):
             """
@@ -1346,11 +1330,11 @@ class Vertibird(object):
             
             self.__set_option_offline()
             
-            self.db_object.drives = list(filter(
+            self.db_object().drives = list(filter(
                 lambda x: x['path'] != img,
-                self.db_object.drives
+                self.db_object().drives
             ))
-            self.db_session.commit()
+            self.db_session().commit()
             
         def create_or_attach_drive(
                 self, img: str, size: int = DEFAULT_DSIZE, dtype: str = 'ide'
@@ -1399,7 +1383,7 @@ class Vertibird(object):
                 pass # Could not have initialized yet
             
             try:
-                os.kill(self.db_object.pid, signal.SIGINT)
+                os.kill(self.db_object().pid, signal.SIGINT)
             except ProcessLookupError:
                 pass # Process does not exist
             
@@ -1417,32 +1401,42 @@ class Vertibird(object):
             
             self._state_check(vnc_connecting)
             
-            return self.db_object.state
+            return self.db_object().state
             
         def _state_check(self, vnc_connecting: bool = False):
             # Check if QEMU instance is actually still running
-            if self.db_object.state != 'offline':
+            if self.db_object().state != 'offline':
                 try:
-                    x = psutil.Process(self.db_object.pid)
+                    x = psutil.Process(self.db_object().pid)
                     
                     # Process ID may have been reclaimed
                     if not (self.id in x.cmdline()):
-                        raise psutil.NoSuchProcess(self.db_object.pid)
+                        raise psutil.NoSuchProcess(self.db_object().pid)
                     
                     # Process may not immediately end
                     if x.status() == 'zombie':
                         x.kill()
                         
-                        raise psutil.NoSuchProcess(self.db_object.pid)
+                        raise psutil.NoSuchProcess(self.db_object().pid)
                 except psutil.NoSuchProcess:
                     pass
                 else:
-                    self.audiopipe = self.db_object.audiopipe
-                    self.ports = self.db_object.ports
+                    self.audiopipe = self.db_object().audiopipe
+                    self.ports = self.db_object().ports
                     
                     if not vnc_connecting:
                         if self.display.connected == False:
                             self.display.connect()
+                        
+                    if self.db_object().audiothrd == False:
+                        self.db_object().audiothrd = True
+                        self.db_session().commit()
+                        
+                        GLOBAL_THREAD_POOL.append(threading.Thread(
+                            target = self.__audio_thread,
+                            daemon = True
+                        ))
+                        GLOBAL_THREAD_POOL[-1].start()
                     
                     return
             
@@ -1451,10 +1445,11 @@ class Vertibird(object):
         def __mark_offline(self):
             self.__file_cleanup()
             
-            self.db_object.handles = None
-            self.db_object.pid   = None
-            self.db_object.state = 'offline'
-            self.db_session.commit()
+            self.db_object().handles = None
+            self.db_object().audiothrd = False
+            self.db_object().pid = None
+            self.db_object().state = 'offline'
+            self.db_session().commit()
             
             try:
                 self.display.disconnect()
@@ -1463,13 +1458,13 @@ class Vertibird(object):
             
         def __file_cleanup(self):
             try:
-                os.remove(self.db_object.audiopipe)
+                os.unlink(self.db_object().audiopipe)
             except (FileNotFoundError, TypeError, OSError):
                 pass # Already removed by something, perhaps a reboot
             else:
                 self.audiopipe = None
-                self.db_object.audiopipe = None
-                self.db_session.commit()
+                self.db_object().audiopipe = None
+                self.db_session().commit()
             
         def __argescape(self, i: str):
             if any((c in set(',=!?<>~#@:;$*()[]{}&%"\'\\+')) for c in i):
@@ -1507,7 +1502,7 @@ class Vertibird(object):
         def __send_monitor_command(self, command: str):
             with telnetlib.Telnet(
                 GLOBAL_LOOPBACK,
-                self.db_object.ports['monitor'],
+                self.db_object().ports['monitor'],
                 TELNET_TIMEOUT_SECS
             ) as session:
                 session.read_until(b'(qemu) ')
@@ -1518,17 +1513,17 @@ class Vertibird(object):
                 session.close()
             
         def __get_fresh_log_file(self):            
-            if self.db_object.log == None:
-                self.db_object.log = self.__get_temp()
-            elif not os.path.isfile(self.db_object.log):
-                self.db_object.log = self.__get_temp()
-            elif os.path.getsize(self.db_object.log) > MAX_LOG_SIZE:
-                os.remove(self.db_object.log)
-                self.db_object.log = self.__get_temp()
+            if self.db_object().log == None:
+                self.db_object().log = self.__get_temp()
+            elif not os.path.isfile(self.db_object().log):
+                self.db_object().log = self.__get_temp()
+            elif os.path.getsize(self.db_object().log) > MAX_LOG_SIZE:
+                os.unlink(self.db_object().log)
+                self.db_object().log = self.__get_temp()
                 
-            self.db_session.commit()
+            self.db_session().commit()
 
-            return self.db_object.log
+            return self.db_object().log
             
         def __get_temp(self, suffix: str = '.dat') -> str:
             generated = tempfile.mkstemp(
@@ -1541,11 +1536,11 @@ class Vertibird(object):
             return generated[1]
             
         def __randomize_ports(self):
-            for x in self.db_object.ports.values():
+            for x in self.db_object().ports.values():
                 if not self.vertibird._check_port_open(x):
-                    self.db_object.ports = self.vertibird._new_ports()
-                    self.db_session.commit()
-                    self.ports = self.db_object.ports
+                    self.db_object().ports = self.vertibird._new_ports()
+                    self.db_session().commit()
+                    self.ports = self.db_object().ports
                     
                     break
             
@@ -1565,6 +1560,27 @@ class Vertibird(object):
                 raise Exceptions.InvalidStateChange(
                     'Function requires VM to be online'
                 )
+                
+        def __get_db_object(self):
+            thread = threading.get_ident()
+            
+            if not (thread in self.db_objects):
+                self.db_objects[thread] = {
+                    'object': self.db_session().query(
+                        self.vertibird.VertiVM
+                    ).filter(
+                        self.vertibird.VertiVM.id == self.id
+                    ).one(),
+                    'session': self.db_session(),
+                    'lease': time.time()
+                }
+                
+            if (time.time() - self.db_objects[thread]['lease']) > DB_CINTERVAL:
+                self.db_objects[thread]['session'].expire_all()
+                self.db_objects[thread]['session'].commit()
+                self.db_objects[thread]['lease'] = time.time()
+                
+            return self.db_objects[thread]['object']
     
     class VertiVM(Base):
         """
@@ -1579,6 +1595,7 @@ class Vertibird(object):
         log        = Column(String)
         pid        = Column(Integer)
         audiopipe  = Column(String)
+        audiothrd  = Column(Boolean, default = False)
         state      = Column(String, default = 'offline')
         memory     = Column(Integer, default = 134217728)
         cores      = Column(Integer, default = 1)
@@ -1741,16 +1758,13 @@ if __name__ == '__main__':
         except Exceptions.InvalidStateChange:
             print('VM already running')
         
-        log = y.get_log()
-        
         print('Start non-blocking')
         
         imgGet = (lambda: cv2.cvtColor(np.asarray(
             y.display.capture().convert('RGB')
         ), cv2.COLOR_RGB2BGR))
         
-        def audplay(local, vmid):
-            y = local().get(vmid)
+        def audplay(y):
             p = pyaudio.PyAudio()
             stream = p.open(format=8,
                             channels=2,
@@ -1771,34 +1785,33 @@ if __name__ == '__main__':
             stream.close()
             aud.close()
             
-        def logplay(log):
+        def logplay(y):
+            logfile = y.get_log()
             while True:
-                line = log.readline()
+                line = logfile.readline()
                 if not line:
                     time.sleep(STATE_CHECK_CLK_SECS)
                     continue
                 sys.stdout.write(line)
 
         threading.Thread(
-            target = audplay, args = (local, y.id), daemon = True
+            target = audplay, args = (y,), daemon = True
         ).start()
         
         threading.Thread(
-            target = logplay, args = (log,), daemon = True
+            target = logplay, args = (y,), daemon = True
         ).start()
         
         time.sleep(1)
         
-        """
         while y.state() == 'online':
             z = imgGet()
                 
             cv2.imshow('image', z)
             cv2.waitKey(34)
             
-            i = (lambda i: 'None' if bool(i) == False else i)(input('>>> '))
-            print(eval(i))
-        """
+            #i = (lambda i: 'None' if bool(i) == False else i)(input('>>> '))
+            #print(eval(i))
         
         y.wait()
         
