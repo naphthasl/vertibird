@@ -272,6 +272,9 @@ class Exceptions(object):
         
     class InvalidArgument(Exception):
         pass
+        
+    class SubprocessLaunchException(Exception):
+        pass
 
 class Vertibird(object):
     """
@@ -376,11 +379,9 @@ class Vertibird(object):
                     shlex.quote(str(size))
                 )
                 
-                subprocess.check_call(
-                    shlex.split(command),
-                    stdin  = subprocess.DEVNULL,
-                    stdout = subprocess.DEVNULL
-                )
+                stderr = io.StringIO()
+                
+                self.__run_cmd(command)
             else:
                 raise Exceptions.InvalidDiskFormat(
                     'No such format: {0}'.format(
@@ -389,6 +390,29 @@ class Vertibird(object):
                 )
         else:
             raise Exceptions.DriveAlreadyExists(img)
+        
+    def create_snapshot(self, snapshot: str, backing: str, size: int):
+        if os.path.isfile(snapshot):
+            raise Exceptions.DriveAlreadyExists(snapshot)
+        
+        if not os.path.isfile(backing):
+            raise Exceptions.LaunchDependencyMissing(backing)
+            
+        if DISK_FORMAT != 'qcow2':
+            raise Exceptions.InvalidArgument(
+                'Snapshots are only supported with qcow2.'
+            )
+            
+        command = 'qemu-img create -f qcow2 -b {0} {1} {2}B'.format(
+            shlex.quote(os.path.relpath(
+                backing,
+                os.path.dirname(snapshot)
+            )),
+            shlex.quote(snapshot),
+            shlex.quote(str(size))
+        )
+        
+        self.__run_cmd(command)
         
     def list(self):
         """
@@ -401,6 +425,27 @@ class Vertibird(object):
                 self.db().query(self.VertiVM.id).all()
             )
         )
+        
+    def __run_cmd(self, command):
+        stderrfile = tempfile.mkstemp()[1]
+        stderr = open(stderrfile, 'w')
+        
+        subprocess.check_call(
+            shlex.split(command),
+            stdin  = subprocess.DEVNULL,
+            stdout = subprocess.DEVNULL,
+            stderr = stderr
+        )
+        stderr.close()
+        stderr = open(stderrfile, 'r')
+        
+        stderr_read = stderr.read()
+        os.remove(stderrfile)
+        
+        if len(stderr_read) > 0:
+            raise Exceptions.SubprocessLaunchException(
+                stderr_read
+            )
         
     def __wrap_live(self, db_object):
         if EXPERIMENTAL_SHARED_INSTANCES:
@@ -1711,7 +1756,7 @@ if __name__ == '__main__':
         global DEBUG
         DEBUG = True
         global DISK_FORMAT
-        DISK_FORMAT = 'raw'
+        DISK_FORMAT = 'qcow2'
         
         x = local()
         
@@ -1729,12 +1774,34 @@ if __name__ == '__main__':
                 y.remove_forwarding(fwd['id'])
             
             y.attach_cdrom(
-                '/home/naphtha/iso/winnt40wks_sp1_en.iso'
+                '/home/naphtha/iso/win10.ISO'
             )
-            y.create_or_attach_drive(
-                './drives/test.img',
-                25769803776,
-                'ide'
+            
+            dsize = 34359738368
+            drives = './drives/'
+            backing = os.path.join(drives, 'win10.qcow2')
+            snapshot = os.path.join(drives, 'win10-mod.qcow2')
+            
+            try:
+                x.create_drive(
+                    backing,
+                    dsize
+                )
+            except Exceptions.DriveAlreadyExists:
+                pass
+            
+            try:
+                x.create_snapshot(
+                    snapshot,
+                    backing,
+                    dsize - os.path.getsize(backing)
+                )
+            except Exceptions.DriveAlreadyExists:
+                pass
+            
+            y.attach_drive(
+                snapshot,
+                'ahci'
             )
             
             options = y.get_properties()
@@ -1808,6 +1875,7 @@ if __name__ == '__main__':
         
         time.sleep(1)
         
+        """
         while y.state() == 'online':
             z = imgGet()
                 
@@ -1816,6 +1884,7 @@ if __name__ == '__main__':
             
             #i = (lambda i: 'None' if bool(i) == False else i)(input('>>> '))
             #print(eval(i))
+        """
         
         y.wait()
         
