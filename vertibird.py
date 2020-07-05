@@ -391,7 +391,7 @@ class Vertibird(object):
         else:
             raise Exceptions.DriveAlreadyExists(img)
         
-    def create_snapshot(self, snapshot: str, backing: str, size: int):
+    def create_snapshot(self, snapshot: str, backing: str):
         if os.path.isfile(snapshot):
             raise Exceptions.DriveAlreadyExists(snapshot)
         
@@ -403,13 +403,12 @@ class Vertibird(object):
                 'Snapshots are only supported with qcow2.'
             )
             
-        command = 'qemu-img create -f qcow2 -b {0} {1} {2}B'.format(
+        command = 'qemu-img create -f qcow2 -b {0} {1}'.format(
             shlex.quote(os.path.relpath(
                 backing,
                 os.path.dirname(snapshot)
             )),
-            shlex.quote(snapshot),
-            shlex.quote(str(size))
+            shlex.quote(snapshot)
         )
         
         self.__run_cmd(command)
@@ -1790,6 +1789,7 @@ if __name__ == '__main__':
             except Exceptions.DriveAlreadyExists:
                 pass
             
+            """
             try:
                 x.create_snapshot(
                     snapshot,
@@ -1798,9 +1798,10 @@ if __name__ == '__main__':
                 )
             except Exceptions.DriveAlreadyExists:
                 pass
+            """
             
             y.attach_drive(
-                snapshot,
+                backing,
                 'ahci'
             )
             
