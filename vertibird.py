@@ -188,6 +188,13 @@ class QEMUDevices(object):
         'Broadwell-noTSX-IBRS': 'Intel Core Processor (Broadwell,-TSX,+IBRS)',
         '486': 'Intel 486 Processor'
     }
+    
+    storage = {
+        'ahci': 'Standard AHCI Device/Serial ATA Device',
+        'ide': 'Standard Machine-aliased IDE Device',
+        'scsi': 'SCSI/SAS-Attached Device',
+        'virtio': 'VirtIO Block Device'
+    }
 
 class Exceptions(object):
     class IncompatibleOperatingSystem(Exception):
@@ -1226,7 +1233,7 @@ class Vertibird(object):
             self.__set_option_offline()
             
             dtype = dtype.lower()
-            if not (dtype in ['ide', 'scsi', 'virtio', 'ahci']):
+            if not (dtype in QEMUDevices.storage.keys()):
                 raise Exceptions.InvalidDriveType(
                     'No such type {0}.'.format(dtype)
                 )
