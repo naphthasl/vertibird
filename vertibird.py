@@ -688,8 +688,6 @@ class Vertibird(object):
             self.db_session = vertibird.db
             self.db_objects = {}
             self.db_object  = self.__get_db_object
-            self.audiopipe  = None
-            self.ports      = self.db_object().ports
             self.display    = self.VMDisplay(self)
             
             # State checking stuff
@@ -795,7 +793,6 @@ class Vertibird(object):
                 self.db_session().commit()
                 os.unlink(self.db_object().audiopipe)
                 os.mkfifo(self.db_object().audiopipe)
-                self.audiopipe = self.db_object().audiopipe
                 
                 arguments = [
                     self.vertibird.qemu, # PROCESS
@@ -1421,9 +1418,6 @@ class Vertibird(object):
                 except psutil.NoSuchProcess:
                     pass
                 else:
-                    self.audiopipe = self.db_object().audiopipe
-                    self.ports = self.db_object().ports
-                    
                     if not vnc_connecting:
                         if self.display.connected == False:
                             self.display.connect()
@@ -1462,7 +1456,6 @@ class Vertibird(object):
             except (FileNotFoundError, TypeError, OSError):
                 pass # Already removed by something, perhaps a reboot
             else:
-                self.audiopipe = None
                 self.db_object().audiopipe = None
                 self.db_session().commit()
             
@@ -1540,7 +1533,6 @@ class Vertibird(object):
                 if not self.vertibird._check_port_open(x):
                     self.db_object().ports = self.vertibird._new_ports()
                     self.db_session().commit()
-                    self.ports = self.db_object().ports
                     
                     break
             
