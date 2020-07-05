@@ -1635,6 +1635,10 @@ def session_generator(*args, **kwargs):
         
 class SessionManager(object):
     """
+    THIS CLASS IS DEPRECATED, DO NOT USE IT.
+    Vertibird() is now threadsafe. Use that instead!
+    
+    DEPRECATED DESCRIPTION
     This allows you to create thread-local or function-local Vertibird
     instances. The reason for this is because Vertibird instances are NOT
     thread-safe, but it IS safe to use multiple instances concurrently, even
@@ -1642,7 +1646,7 @@ class SessionManager(object):
     
     In summary...
     ---------------------------------------------------------------------------
-    THREAD SAFE         : NO
+    THREAD SAFE         : ~~NO~~ [THIS IS NOW YES]
     MULTI-INSTANCE SAFE : YES
     PROCESS SAFE        : YES
     """
@@ -1785,6 +1789,9 @@ if __name__ == '__main__':
                     time.sleep(STATE_CHECK_CLK_SECS)
                     continue
                 sys.stdout.write(line)
+                
+        def testthread(y):
+            print(y.state())
 
         threading.Thread(
             target = audplay, args = (y,), daemon = True
@@ -1792,6 +1799,10 @@ if __name__ == '__main__':
         
         threading.Thread(
             target = logplay, args = (y,), daemon = True
+        ).start()
+        
+        threading.Thread(
+            target = testthread, args = (y,), daemon = True
         ).start()
         
         time.sleep(1)
