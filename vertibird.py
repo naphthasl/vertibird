@@ -19,7 +19,7 @@ License: MIT (see LICENSE for details)
 
 import shelve, threading, time, uuid, socket, subprocess, os, telnetlib, signal
 import sys, shlex, random, string, psutil, zlib, builtins, select, tempfile, io
-import ipaddress, zmq, collections
+import ipaddress, zmq, collections, traceback
 
 from contextlib import closing
 
@@ -744,48 +744,64 @@ class Vertibird(object):
             except:
                 pass # Already garbage collected
 
+        def __check_main_thread(self):
+            return threading.main_thread().is_alive()
+
         def __audio_thread(self):
             """
             Automatically converts the named pipe into a ZMQ broadcast.
             """
 
-            while self.state(vnc_connecting = True) == 'offline':
-                time.sleep(STATE_CHECK_CLK_SECS)
+            try:
+                while self.state(vnc_connecting = True) == 'offline':
+                    if not self.__check_main_thread():
+                        return
+                    
+                    time.sleep(STATE_CHECK_CLK_SECS)
+                    
+                    self.db_session().commit()
+                
+                context = zmq.Context()
+                socket = context.socket(zmq.PUB)
                 
                 self.db_session().commit()
-            
-            context = zmq.Context()
-            socket = context.socket(zmq.PUB)
-            
-            self.db_session().commit()
-            ftr = self.db_object().audiopipe
-            bindport = self.db_object().ports['audio']
-            
-            try:
-                socket.bind('tcp://{0}:{1}'.format(
-                    GLOBAL_LOOPBACK,
-                    bindport
-                ))
+                ftr = self.db_object().audiopipe
+                bindport = self.db_object().ports['audio']
                 
-                f = open(ftr, 'rb')
-            except (zmq.error.ZMQError, FileNotFoundError):
-                return
-            
-            while self.state(vnc_connecting = True) != 'offline':
                 try:
-                    if not os.path.exists(
-                            ftr
-                        ):
-                        raise FileNotFoundError('Pipe missing')
+                    socket.bind('tcp://{0}:{1}'.format(
+                        GLOBAL_LOOPBACK,
+                        bindport
+                    ))
                     
-                    p = f.read(AUDIO_BLOCK_SIZE)
+                    f = open(ftr, 'rb')
+                except (zmq.error.ZMQError, FileNotFoundError):
+                    return
+                
+                while self.state(vnc_connecting = True) != 'offline':
+                    if not self.__check_main_thread():
+                        return
                     
-                    socket.send(p)
-                except (FileNotFoundError, OSError):
-                    break
+                    try:
+                        if not os.path.exists(
+                                ftr
+                            ):
+                            raise FileNotFoundError('Pipe missing')
+                        
+                        p = f.read(AUDIO_BLOCK_SIZE)
+                        
+                        socket.send(p)
+                    except (FileNotFoundError, OSError):
+                        break
+                
+                socket.close()
+                f.close()
+            except Exception as e:
+                traceback.print_exc()
             
-            socket.close()
-            f.close()
+            self.db_object().audiothrd = False
+            self.db_session().commit()
+            
             self.db_session().close()
 
         def wait(self):
@@ -1469,11 +1485,10 @@ class Vertibird(object):
                         self.db_object().audiothrd = True
                         self.db_session().commit()
                         
-                        GLOBAL_THREAD_POOL.append(threading.Thread(
+                        threading.Thread(
                             target = self.__audio_thread,
-                            daemon = True
-                        ))
-                        GLOBAL_THREAD_POOL[-1].start()
+                            daemon = False
+                        ).start()
                     
                     return
             
