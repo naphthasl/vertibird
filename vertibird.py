@@ -61,6 +61,7 @@ __all__ = [
 
 # TODO: Try to find a better way to deal with the thread-safety issues caused
 # by SQLite. It's REALLY annoying. Like, a HUGE problem.
+# [PARTIALLY SOLVED]
 
 # TODO: Allow mixed usage of disk formats.
 
