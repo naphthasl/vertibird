@@ -35,6 +35,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import scoped_session
 from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm.exc import ObjectDereferencedError
 
 __author__ = 'Naphtha Nepanthez'
 __version__ = '0.0.4'
@@ -69,20 +70,39 @@ __all__ = [
 
 # TODO: Add clones and snapshots
 
+# Connection details (note: QEMU_VNC_ADDS is related to a quirk with QEMU)
 GLOBAL_LOOPBACK = '127.0.0.1'
 QEMU_VNC_ADDS = 5900
+
+# Connection timeouts
 TELNET_TIMEOUT_SECS = 1
 VNC_TIMEOUT_SECS = TELNET_TIMEOUT_SECS
+
+# Realtime state check and non-realtime state check poll times
 STATE_CHECK_CLK_SECS = 0.075
+STATE_CHECK_NRLT_CLK_SECS = 0.5
+
+# Audio options
 AUDIO_CLEAR_INTERVAL = 1
 AUDIO_MAX_SIZE = 17640
-MAX_LOG_SIZE = 8192
 AUDIO_BLOCK_SIZE = 4096
+
+# Logging options
+MAX_LOG_SIZE = 8192
+
+# Function defaults
 DEFAULT_DSIZE = 8589934592
 VNC_IMAGE_MODE = 'RGB'
-VNC_NO_SIGNAL_MESSAGE = 'Unable to retrieve frames from VNC server right now.'
 DISK_FORMAT = 'qcow2'
+
+# Customization
+VNC_NO_SIGNAL_MESSAGE = 'Unable to retrieve frames from VNC server right now.'
+
+# Debugging
 DEBUG = False
+EXPERIMENTAL_SHARED_INSTANCES = False
+
+# Static constants
 BLANK_WAV_HEADER =\
     b'RIFF\x00\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01'\
     b'\x00\x02\x00D\xac\x00\x00\x10\xb1\x02\x00\x04\x00'\
@@ -292,6 +312,7 @@ class Vertibird(object):
         self.Base.metadata.create_all(self.engine)
         self.scoped_db = scoped_session((sessionmaker(bind = self.engine)))
         self.db = self.scoped_db()
+        self.vm_instances = {}
     
     def create(self):
         """
@@ -365,7 +386,21 @@ class Vertibird(object):
         )
         
     def __wrap_live(self, db_object):
-        return self.VertiVMLive(self, self.db, db_object)
+        if EXPERIMENTAL_SHARED_INSTANCES:
+            if not (db_object.id in self.vm_instances):
+                self.vm_instances[db_object.id] = self.VertiVMLive(
+                    self,
+                    self.db,
+                    db_object
+                )
+            
+            return self.vm_instances[db_object.id]
+        else:
+            return self.VertiVMLive(
+                self,
+                self.db,
+                db_object
+            )
     
     class VertiVMLive(object):
         class VMDisplay(object):
@@ -447,7 +482,7 @@ class Vertibird(object):
                             sub.setsockopt(zmq.SUBSCRIBE, b"")
                             sub.setsockopt(
                                 zmq.RCVTIMEO, round(
-                                    STATE_CHECK_CLK_SECS * 1000
+                                    STATE_CHECK_NRLT_CLK_SECS * 1000
                                 )
                             )
                             
@@ -464,8 +499,6 @@ class Vertibird(object):
                                 self.audio.append(sub.recv())
                                 
                             sub.close()
-                                
-                            time.sleep(STATE_CHECK_CLK_SECS)
                         except zmq.error.Again:
                             pass
                 
@@ -621,13 +654,20 @@ class Vertibird(object):
                 Automatically converts the named pipe into a ZMQ broadcast.
                 """
                 
-                while True:
-                    while self.vmlive.audiopipe == None:
-                        time.sleep(STATE_CHECK_CLK_SECS)
+                while self.threads['audio']['needed']:
+                    # Wait until the audio pipe is available/exists.
+                    if (self.vmlive.audiopipe == None
+                         or (not os.path.exists(str(self.vmlive.audiopipe)))   
+                        ):
+                        
+                        time.sleep(STATE_CHECK_NRLT_CLK_SECS)
+                        
+                        continue
                     
                     # This lock is important, as it prevents
                     # multiple processes screwing around with the
                     # named pipe. You only need one.
+                    ftr = str(self.vmlive.audiopipe)
                     with FileLock(self.vmlive.audiopipe):
                         context = zmq.Context()
                         socket = context.socket(zmq.PUB)
@@ -643,29 +683,40 @@ class Vertibird(object):
                         except (zmq.error.ZMQError, FileNotFoundError):
                             continue
                         
-                        while True:
-                            if self.vmlive.ports['audio'] != bindport:
-                                break
-                            
-                            if self.vmlive.audiopipe != None:
-                                try:
-                                    if not os.path.exists(
-                                            self.vmlive.audiopipe
-                                        ):
-                                        raise OSError('Pipe missing')
-                                    
-                                    p = f.read(AUDIO_BLOCK_SIZE)
-                                    
-                                    socket.send(p)
-                                except (FileNotFoundError, OSError):
-                                    self.vmlive.audiopipe = None
-                            else:
-                                break
+                        # Can exit if:
+                        # - Port has changed
+                        # - Audio pipe has been removed from database/stopped
+                        # - Audio pipe file nolonger exists
+                        # - Reading from the pipe raised an exception
+                        while (self.vmlive.ports['audio'] == bindport
+                                and self.vmlive.audiopipe != None
+                            ):
+                                
+                            try:
+                                if not os.path.exists(
+                                        self.vmlive.audiopipe
+                                    ):
+                                    raise FileNotFoundError('Pipe missing')
+                                
+                                p = f.read(AUDIO_BLOCK_SIZE)
+                                
+                                socket.send(p)
+                            except (FileNotFoundError, OSError):
+                                self.vmlive.audiopipe = None
                         
                         socket.close()
                         f.close()
                         
-                    time.sleep(STATE_CHECK_CLK_SECS)
+                    try:
+                        os.remove(ftr)
+                    except (FileNotFoundError, OSError, TypeError):
+                        pass # Already deleted
+                    
+                    # Upon exit, file lock is cleared and the loop waits until
+                    # the audio pipe is available again.
+                        
+            def __del__(self):
+                self.threads['audio']['needed'] = False
                         
             def __init__(self, vmlive):
                 self.vmlive = vmlive
@@ -674,15 +725,16 @@ class Vertibird(object):
                 self.disconnect()
                 self.shape = (640, 480)
                 
-                self.threads = []
+                self.threads = {}
                 
-                self.threads.append(
-                    threading.Thread(
+                self.threads['audio'] = {
+                    'thread': threading.Thread(
                         target = self.__audio_thread,
                         daemon = True
-                    )
-                )
-                self.threads[-1].start()
+                    ),
+                    'needed': True
+                }
+                self.threads['audio']['thread'].start()
                 
                 self.connect()
                         
@@ -706,7 +758,10 @@ class Vertibird(object):
         def __del__(self):
             # Check state on exit/delete too, just in case.
             # (Also to ensure named pipe for audio is deleted)
-            self.state()
+            try:
+                self.state()
+            except:
+                pass # Already garbage collected
             
         def wait(self):
             """
@@ -714,7 +769,7 @@ class Vertibird(object):
             """
             
             while self.state() != 'offline':
-                time.sleep(STATE_CHECK_CLK_SECS)
+                time.sleep(STATE_CHECK_NRLT_CLK_SECS)
             
         def remove(self):
             """
@@ -751,7 +806,8 @@ class Vertibird(object):
                     except OSError:
                         pass # Already removed
                 
-                self.db_object.audiopipe = tempfile.mkstemp(suffix='.wav')[1]
+                self.db_object.audiopipe = self.__get_temp(suffix = '.pipe')
+                
                 self.db_session.commit()
                 os.remove(self.db_object.audiopipe)
                 os.mkfifo(self.db_object.audiopipe)
@@ -1022,7 +1078,7 @@ class Vertibird(object):
                 self.state()
                 self.display.connect()
                 
-                time.sleep(STATE_CHECK_CLK_SECS)
+                time.sleep(STATE_CHECK_NRLT_CLK_SECS)
                 
                 if not (process.returncode in [None, 0]):
                     self.state()
@@ -1396,7 +1452,6 @@ class Vertibird(object):
             self.__file_cleanup()
             
             self.db_object.handles = None
-            self.db_object.audiopipe = None
             self.db_object.pid   = None
             self.db_object.state = 'offline'
             self.db_session.commit()
@@ -1407,12 +1462,14 @@ class Vertibird(object):
                 pass # Display not set up yet
             
         def __file_cleanup(self):
-            self.audiopipe = None
-            
             try:
                 os.remove(self.db_object.audiopipe)
-            except (FileNotFoundError, TypeError):
+            except (FileNotFoundError, TypeError, OSError):
                 pass # Already removed by something, perhaps a reboot
+            else:
+                self.audiopipe = None
+                self.db_object.audiopipe = None
+                self.db_session.commit()
             
         def __argescape(self, i: str):
             if any((c in set(',=!?<>~#@:;$*()[]{}&%"\'\\+')) for c in i):
@@ -1462,16 +1519,26 @@ class Vertibird(object):
             
         def __get_fresh_log_file(self):            
             if self.db_object.log == None:
-                self.db_object.log = tempfile.mkstemp()[1]
+                self.db_object.log = self.__get_temp()
             elif not os.path.isfile(self.db_object.log):
-                self.db_object.log = tempfile.mkstemp()[1]
+                self.db_object.log = self.__get_temp()
             elif os.path.getsize(self.db_object.log) > MAX_LOG_SIZE:
                 os.remove(self.db_object.log)
-                self.db_object.log = tempfile.mkstemp()[1]
+                self.db_object.log = self.__get_temp()
                 
             self.db_session.commit()
 
             return self.db_object.log
+            
+        def __get_temp(self, suffix: str = '.dat') -> str:
+            generated = tempfile.mkstemp(
+                suffix = suffix
+            )
+            
+            # Nobody is going to use the OS-level handle
+            os.close(generated[0])
+            
+            return generated[1]
             
         def __randomize_ports(self):
             for x in self.db_object.ports.values():
