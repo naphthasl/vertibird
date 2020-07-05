@@ -47,6 +47,26 @@ __all__ = [
     'Exceptions'
 ]
 
+# TODO: Allow CD-ROMs and floppy disks to be removed and inserted during
+# operation
+
+# TODO: Perhaps create some sort of MKV/MP4/whatever stream out of the VM's
+# video and audio output?
+
+# TODO: Allow for multiple network devices, some of which may not use
+# usermode networking
+
+# TODO: Find some way to support "picky" operating systems like Mac OS
+
+# TODO: Try to find a better way to deal with the thread-safety issues caused
+# by SQLite. It's REALLY annoying. Like, a HUGE problem.
+
+# TODO: Allow mixed usage of disk formats.
+
+# TODO: Support more than 2 attached IDE devices with multiple IDE buses.
+
+# TODO: General code cleanup.
+
 GLOBAL_LOOPBACK = '127.0.0.1'
 QEMU_VNC_ADDS = 5900
 TELNET_TIMEOUT_SECS = 1
