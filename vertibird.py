@@ -67,6 +67,8 @@ __all__ = [
 
 # TODO: General code cleanup.
 
+# TODO: Add clones and snapshots
+
 GLOBAL_LOOPBACK = '127.0.0.1'
 QEMU_VNC_ADDS = 5900
 TELNET_TIMEOUT_SECS = 1
