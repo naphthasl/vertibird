@@ -330,6 +330,10 @@ class Vertibird(object):
                 bind = engine
             ))()
             
+            for key in self.db_instances.keys():
+                if not self._check_thread_id_alive(key):
+                    del self.db_instances[key]
+            
         return self.db_instances[thread]
     
     def create(self):
@@ -1625,6 +1629,10 @@ class Vertibird(object):
                     'lease': time.time()
                 }
                 
+                for key in self.db_objects.keys():
+                    if not self.vertibird._check_thread_id_alive(key):
+                        del self.db_objects[key]
+                
             if (time.time() - self.db_objects[thread]['lease']) > DB_CINTERVAL:
                 self.db_objects[thread]['session'].expire_all()
                 self.db_objects[thread]['session'].commit()
@@ -1663,13 +1671,13 @@ class Vertibird(object):
         drives     = Column(PickleType, default = [])
         forwarding = Column(PickleType, default = [])
     
-    def __find_free_port(self):
+    def __find_free_port(self) -> int:
         with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
             s.bind(('', 0))
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             return s.getsockname()[1]
     
-    def _check_port_open(self, port):
+    def _check_port_open(self, port) -> bool:
         host = GLOBAL_LOOPBACK
         
         with closing(
@@ -1681,7 +1689,13 @@ class Vertibird(object):
             else:
                 return False
     
-    def _new_ports(self):
+    def _check_thread_id_alive(self, thread_id: int) -> bool:
+        if thread_id in map(lambda x: x.ident, threading.enumerate()):
+            return True
+        else:
+            return False
+    
+    def _new_ports(self) -> dict:
         return {
             'vnc': self.__find_free_port(),
             'monitor': self.__find_free_port(),
