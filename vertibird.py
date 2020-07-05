@@ -82,6 +82,7 @@ STATE_CHECK_CLK_SECS = 0.075
 STATE_CHECK_NRLT_CLK_SECS = 0.5
 DB_CINTERVAL = 0.2
 VNC_FRAMERATE = 60
+CPU_USAGE_INTERVAL = 1
 
 # Audio options
 AUDIO_CLEAR_INTERVAL = 1
@@ -1412,6 +1413,33 @@ class Vertibird(object):
 
             self.attach_drive(img, dtype)
         
+        def get_cpu_percent(self):
+            """
+            Return the percentage CPU utilization for the virtual machine.
+            
+            It is automatically divided between the cores, so a virtual machine
+            with 2 cores running a dual-core benchmark would report a
+            utilization of 100% and a completely idle virtual machine with 2
+            cores would report 0%. Values can potentially be larger than 100%.
+            """
+            
+            self.__check_running()
+            
+            return psutil.Process(
+                self.db_object().pid
+            ).cpu_percent(interval=CPU_USAGE_INTERVAL) / self.db_object().cores
+            
+        def get_memory_usage(self):
+            """
+            Return the resident set size (non-swapped physical memory) that
+            has been consumed by the virtual machine
+            """
+            self.__check_running()
+            
+            return psutil.Process(
+                self.db_object().pid
+            ).memory_info().rss
+        
         def signal_shutdown(self):
             """
             Sends the shutdown signal. This is non-blocking.
@@ -1447,7 +1475,7 @@ class Vertibird(object):
             except ProcessLookupError:
                 pass # Process does not exist
             
-            self.__mark_offline()
+            self.state()
             
         def state(self, vnc_connecting: bool = False) -> str:
             """
