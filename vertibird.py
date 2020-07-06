@@ -69,6 +69,10 @@ __all__ = [
 # TODO: Add disk cloning, although you could just copy the backing file
 # [POTENTIALLY OUT OF SCOPE]
 
+# TODO: Deal with SQLite/Alchemy exception whenever thread is garbage
+# collected (different threads, etc)
+# Maybe delete session for thread every commit and recreate it when needed?
+
 # Connection details (note: QEMU_VNC_ADDS is related to a quirk with QEMU)
 GLOBAL_LOOPBACK = '127.0.0.1'
 QEMU_VNC_ADDS = 5900
