@@ -112,13 +112,26 @@ BLANK_WAV_HEADER =\
 GLOBAL_THREAD_POOL = []
 
 class QEMUDevices(object):
-    vga = {
+    vga_arg = {
         'none': 'No Graphics',
         'std': 'Standard VGA',
         'cirrus': 'Cirrus VGA',
         'vmware': 'VMWare SVGA',
         'qxl': 'QXL VGA',
         'virtio': 'VirtIO VGA'
+    }
+    
+    vga = {
+        'bochs-display': 'Bochs Linear Framebuffer',
+        'virtio-vga': 'VirtIO VGA',
+        'virtio-vga,virgl=on': 'VirtIO VGA + VirGL',
+        'qxl-vga': 'QXL VGA',
+        'cirrus-vga': 'Cirrus CLGD 54xx VGA',
+        'isa-cirrus-vga': 'Cirrus CLGD 54xx VGA (ISA)',
+        'VGA': 'Standard VGA',
+        'isa-vga': 'Standard VGA (ISA)',
+        'ramfb': 'Guest Memory Framebuffer',
+        'vmware-svga': 'VMWare SVGA-II (vmwgfx?)'
     }
     
     machine = {
@@ -899,8 +912,17 @@ class Vertibird(object):
                     'base={0},clock=host,driftfix=slew'.format(
                         self.__argescape(self.db_object().rtc)
                     ),
-                    '-vga',
-                    self.__argescape(self.db_object().vga),
+                    '-device',
+                    # I had to remove escaping for the VGA device because some
+                    # of them have optional properties (like ati-vga and
+                    # virtio-gpu) that allow for important features that
+                    # un-privileged users should have access to. Luckily this
+                    # doesn't really matter (unless the SQLite database is
+                    # compromised) because the name of the VGA device is
+                    # checked against the list of available VGA devices and
+                    # variations when you set it anyway, and it will raise an
+                    # exception if the device is invalid.
+                    self.db_object().vga,
                     '-audiodev',
                     'wav,path={0},id=audioout'.format(
                         self.__argescape(self.db_object().audiopipe)
@@ -970,7 +992,7 @@ class Vertibird(object):
                         raise Exceptions.InvalidGenericDeviceType(
                             'ISA-Only PC requires an ISA-specific NIC device'
                         )
-                    elif not (self.db_object().vga in ['vga', 'cirrus']):
+                    elif not ('isa' in self.db_object().vga):
                         raise Exceptions.InvalidGenericDeviceType(
                             'ISA-Only PC requires an ISA-specific VGA device'
                         )
@@ -1697,7 +1719,7 @@ class Vertibird(object):
         cores      = Column(Integer, default = 1)
         cpu        = Column(String, default = 'host')
         machine    = Column(String, default = 'pc')
-        vga        = Column(String, default = 'std')
+        vga        = Column(String, default = 'VGA')
         sound      = Column(String, default = 'hda')
         bootorder  = Column(String, default = 'cdn')
         network    = Column(String, default = 'rtl8139')
@@ -1837,9 +1859,9 @@ if __name__ == '__main__':
             for fwd in y.list_forwardings():
                 y.remove_forwarding(fwd['id'])
             
-            #y.attach_cdrom(
-            #    '/home/naphtha/Downloads/ubuntu-20.04-desktop-amd64.iso'
-            #)
+            y.attach_cdrom(
+                '/home/naphtha/Downloads/ubuntu-20.04-desktop-amd64.iso'
+            )
             
             dsize = 34359738368
             drives = './drives/'
@@ -1876,7 +1898,7 @@ if __name__ == '__main__':
             options['cores'] = 2
             options['network'] = 'rtl8139'
             options['sound'] = 'hda'
-            options['vga'] = 'std'
+            options['vga'] = 'VGA'
             options['scsi'] = 'lsi53c895a'
             options['floppy'] = None
             y.set_properties(options)
