@@ -331,10 +331,6 @@ class Vertibird(object):
                 bind = engine
             ))()
             
-            for key in self.db_instances.keys():
-                if not self._check_thread_id_alive(key):
-                    del self.db_instances[key]
-            
         return self.db_instances[thread]
     
     def create(self):
@@ -875,6 +871,8 @@ class Vertibird(object):
                         GLOBAL_LOOPBACK,
                         self.db_object().ports['vnc'] - QEMU_VNC_ADDS
                     ),
+                    '-display',
+                    'egl-headless', # Needs more testing, but should allow 3D
                     '-m',
                     '{0}B'.format(self.db_object().memory),
                     '-overcommit',
@@ -884,7 +882,7 @@ class Vertibird(object):
                         self.__argescape(self.db_object().bootorder)
                     ),
                     '-cpu',
-                    ('{0}').format(
+                    ('{0},-hypervisor').format(
                         self.__argescape(self.db_object().cpu)
                     ),
                     '-smp',
@@ -924,6 +922,15 @@ class Vertibird(object):
                                 self.__argescape(x['internal_port'])
                             ) for x in self.db_object().forwarding
                         ])
+                    ),
+                    '-smbios',
+                    'type=0,vendor="American Megatrends Inc.",version=B.40,' +
+                    'date=11/07/2019,release=5.14,uefi=off',
+                    '-smbios',
+                    'type=1,manufacturer="Gigabyte Technology Co. Ltd"' +
+                    ',product=MS-7A38,uuid={0},version=8.0,serial={1}'.format(
+                        self.__argescape(self.id),
+                        self.__argescape('To be filled by O.E.M.')
                     )
                 ]
                 
@@ -1657,9 +1664,12 @@ class Vertibird(object):
                     'lease': time.time()
                 }
                 
-                for key in self.db_objects.keys():
-                    if not self.vertibird._check_thread_id_alive(key):
-                        del self.db_objects[key]
+                try:
+                    for key in self.db_objects.keys():
+                        if not self.vertibird._check_thread_id_alive(key):
+                            del self.db_objects[key]
+                except:
+                    pass
                 
             if (time.time() - self.db_objects[thread]['lease']) > DB_CINTERVAL:
                 self.db_objects[thread]['session'].expire_all()
@@ -1827,14 +1837,13 @@ if __name__ == '__main__':
             for fwd in y.list_forwardings():
                 y.remove_forwarding(fwd['id'])
             
-            y.attach_cdrom(
-                '/home/naphtha/iso/win10.ISO'
-            )
+            #y.attach_cdrom(
+            #    '/home/naphtha/Downloads/ubuntu-20.04-desktop-amd64.iso'
+            #)
             
             dsize = 34359738368
             drives = './drives/'
             backing = os.path.join(drives, 'win10.qcow2')
-            snapshot = os.path.join(drives, 'win10-mod.qcow2')
             
             try:
                 x.create_drive(
