@@ -902,7 +902,16 @@ class Vertibird(object):
                         self.__argescape(self.db_object().cpu)
                     ),
                     '-smp',
-                    str(self.db_object().cores),
+                    'cpus={3},sockets={0},cores={1},threads={2}'.format(
+                        self.__argescape(str(self.db_object().sockets)),
+                        self.__argescape(str(self.db_object().cores)),
+                        self.__argescape(str(self.db_object().threads)),
+                        self.__argescape(str(
+                            self.db_object().sockets *
+                            self.db_object().cores *
+                            self.db_object().threads
+                        ))
+                    ),
                     '-machine',
                     'type={0},accel=kvm'.format(
                         self.__argescape(self.db_object().machine)
@@ -1214,7 +1223,9 @@ class Vertibird(object):
             self.__set_option_offline()
             
             memory    = int (properties['memory'   ])
+            sockets   = int (properties['sockets'  ])
             cores     = int (properties['cores'    ])
+            threads   = int (properties['threads'  ])
             cpu       = str (properties['cpu'      ])
             machine   = str (properties['machine'  ])
             vga       = str (properties['vga'      ])
@@ -1227,6 +1238,8 @@ class Vertibird(object):
             usbinput  = bool(properties['usbinput' ])
             rtc       = str (properties['rtc'      ])
             
+            totcores = sockets * cores * threads
+            
             # So apparently assertions can be removed in production use or
             # whatever, so I have to do this horrible mess instead. Is this
             # really what you wanted? Do you have any idea how much better a
@@ -1234,7 +1247,7 @@ class Vertibird(object):
             # hell thought assertions ought to be expendable...
             if memory < 8388608:
                 raise Exceptions.InvalidArgument('Memory allocation too low')
-            elif cores > os.cpu_count() or cores < 1:
+            elif totcores > os.cpu_count() or totcores < 1:
                 raise Exceptions.InvalidArgument('Invalid core count')
             elif not (vga in QEMUDevices.vga.keys()):
                 raise Exceptions.InvalidArgument('Invalid display adapter')
@@ -1257,7 +1270,9 @@ class Vertibird(object):
                 raise Exceptions.InvalidArgument('Invalid processor')
             
             self.db_object().memory    = memory
+            self.db_object().sockets   = sockets
             self.db_object().cores     = cores
+            self.db_object().threads   = threads
             self.db_object().cpu       = cpu
             self.db_object().machine   = machine
             self.db_object().vga       = vga
@@ -1719,7 +1734,9 @@ class Vertibird(object):
         audiothrd  = Column(Boolean, default = False)
         state      = Column(String, default = 'offline')
         memory     = Column(Integer, default = 134217728)
+        sockets    = Column(Integer, default = 1)
         cores      = Column(Integer, default = 1)
+        threads    = Column(Integer, default = 1)
         cpu        = Column(String, default = 'host')
         machine    = Column(String, default = 'pc')
         vga        = Column(String, default = 'VGA')
@@ -1898,8 +1915,10 @@ if __name__ == '__main__':
             options = y.get_properties()
             options['machine'] = 'pc'
             options['memory'] = 8589934592
-            options['cpu'] = 'host'
-            options['cores'] = 12
+            options['cpu'] = 'EPYC-IBPB'
+            options['sockets'] = 1
+            options['cores'] = 6
+            options['threads'] = 2
             options['network'] = 'e1000'
             options['sound'] = 'hda'
             options['vga'] = 'vmware-svga'
