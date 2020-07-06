@@ -1859,9 +1859,9 @@ if __name__ == '__main__':
             for fwd in y.list_forwardings():
                 y.remove_forwarding(fwd['id'])
             
-            y.attach_cdrom(
-                '/home/naphtha/Downloads/ubuntu-20.04-desktop-amd64.iso'
-            )
+            #y.attach_cdrom(
+            #    '/home/naphtha/Downloads/ubuntu-20.04-desktop-amd64.iso'
+            #)
             
             dsize = 34359738368
             drives = './drives/'
@@ -1898,7 +1898,7 @@ if __name__ == '__main__':
             options['cores'] = 2
             options['network'] = 'rtl8139'
             options['sound'] = 'hda'
-            options['vga'] = 'VGA'
+            options['vga'] = 'vmware-svga'
             options['scsi'] = 'lsi53c895a'
             options['floppy'] = None
             y.set_properties(options)
