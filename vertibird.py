@@ -38,7 +38,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm.exc import ObjectDereferencedError
 
 __author__ = 'Naphtha Nepanthez'
-__version__ = '0.0.6'
+__version__ = '0.0.7'
 __license__ = 'MIT' # SEE LICENSE FILE
 __all__ = [
     'Vertibird',
@@ -61,13 +61,7 @@ __all__ = [
 # TODO: Find some way to support "picky" operating systems like Mac OS
 # [POTENTIALLY OUT OF SCOPE]
 
-# TODO: Allow mixed usage of disk formats.
-# [POTENTIALLY OUT OF SCOPE]
-
 # TODO: Support more than 2 attached IDE devices with multiple IDE buses.
-
-# TODO: Add disk cloning, although you could just copy the backing file
-# [POTENTIALLY OUT OF SCOPE]
 
 # Connection details (note: QEMU_VNC_ADDS is related to a quirk with QEMU)
 GLOBAL_LOOPBACK = '127.0.0.1'
