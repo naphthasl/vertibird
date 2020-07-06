@@ -1897,10 +1897,10 @@ if __name__ == '__main__':
             
             options = y.get_properties()
             options['machine'] = 'pc'
-            options['memory'] = 2147483648
-            options['cpu'] = 'core2duo'
-            options['cores'] = 2
-            options['network'] = 'rtl8139'
+            options['memory'] = 8589934592
+            options['cpu'] = 'host'
+            options['cores'] = 12
+            options['network'] = 'e1000'
             options['sound'] = 'hda'
             options['vga'] = 'vmware-svga'
             options['scsi'] = 'lsi53c895a'
