@@ -969,8 +969,6 @@ class Vertibird(object):
                             }[self.db_object().machine]
                         ),
                         '-device',
-                        'usb-tablet,id=input0',
-                        '-device',
                         '{0},id=scsi'.format(
                             self.__argescape(self.db_object().scsi)
                         ),
@@ -986,6 +984,14 @@ class Vertibird(object):
                         '-device',
                         'virtio-rng-pci,rng=rng0'
                     ]
+                    
+                    if self.db_object().usbinput == True:
+                        arguments += [
+                            '-device',
+                            'usb-tablet,id=input0',
+                            '-device',
+                            'usb-kbd,id=input1'
+                        ]
                 else:
                     if not (self.db_object().sound in ['adlib','sb16','gus']):
                         raise Exceptions.InvalidGenericDeviceType(
@@ -1197,6 +1203,7 @@ class Vertibird(object):
                 'numa'      : self.db_object().numa     ,
                 'scsi'      : self.db_object().scsi     ,
                 'rtc'       : self.db_object().rtc      ,
+                'usbinput'  : self.db_object().usbinput ,
             }
         
         def set_properties(self, properties: dict):
@@ -1217,6 +1224,7 @@ class Vertibird(object):
             floppy    =     (properties['floppy'   ])
             scsi      = str (properties['scsi'     ])
             numa      = bool(properties['numa'     ])
+            usbinput  = bool(properties['usbinput' ])
             rtc       = str (properties['rtc'      ])
             
             # So apparently assertions can be removed in production use or
@@ -1259,6 +1267,7 @@ class Vertibird(object):
             self.db_object().floppy    = floppy
             self.db_object().scsi      = scsi
             self.db_object().numa      = numa
+            self.db_object().usbinput  = usbinput
             self.db_object().rtc       = rtc
             self.db_session().commit()
         
@@ -1720,6 +1729,7 @@ class Vertibird(object):
         scsi       = Column(String, default = 'lsi53c895a')
         rtc        = Column(String, default = 'utc')
         floppy     = Column(String)
+        usbinput   = Column(Boolean, default = False)
         numa       = Column(Boolean, default = False)
         cdroms     = Column(PickleType, default = [])
         drives     = Column(PickleType, default = [])
@@ -1895,6 +1905,7 @@ if __name__ == '__main__':
             options['vga'] = 'vmware-svga'
             options['scsi'] = 'lsi53c895a'
             options['floppy'] = None
+            options['usbinput'] = False
             y.set_properties(options)
                         
         try:
