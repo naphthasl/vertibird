@@ -143,6 +143,12 @@ class QEMUDevices(object):
         'adlib': 'Yamaha YM3812 (OPL2)'
     }
     
+    inputs = {
+        'ps2': 'PS/2 Compatible Keyboard and Mouse',
+        'usb-mouse': 'Standard USB Keyboard and Mouse',
+        'usb-tablet': 'Standard USB Keyboard and Tablet'
+    }
+    
     network = {
         'e1000': 'Intel 82540EM Gigabit Ethernet',
         'e1000-82544gc': 'Intel 82544GC Gigabit Ethernet',
@@ -994,10 +1000,14 @@ class Vertibird(object):
                         'virtio-rng-pci,rng=rng0'
                     ]
                     
-                    if self.db_object().usbinput == True:
+                    if self.db_object().inputdev in [
+                            'usb-mouse', 'usb-tablet'
+                        ]:
                         arguments += [
                             '-device',
-                            'usb-tablet,id=input0',
+                            '{0},id=input0'.format(
+                                self.db_object().inputdev
+                            ),
                             '-device',
                             'usb-kbd,id=input1'
                         ]
@@ -1212,7 +1222,7 @@ class Vertibird(object):
                 'numa'      : self.db_object().numa     ,
                 'scsi'      : self.db_object().scsi     ,
                 'rtc'       : self.db_object().rtc      ,
-                'usbinput'  : self.db_object().usbinput ,
+                'inputdev'  : self.db_object().inputdev ,
             }
         
         def set_properties(self, properties: dict):
@@ -1235,7 +1245,7 @@ class Vertibird(object):
             floppy    =     (properties['floppy'   ])
             scsi      = str (properties['scsi'     ])
             numa      = bool(properties['numa'     ])
-            usbinput  = bool(properties['usbinput' ])
+            inputdev  = str (properties['inputdev' ])
             rtc       = str (properties['rtc'      ])
             
             totcores = sockets * cores * threads
@@ -1268,6 +1278,8 @@ class Vertibird(object):
                 raise Exceptions.InvalidArgument('Invalid RTC clock preset')
             elif not (cpu in QEMUDevices.cpu.keys()):
                 raise Exceptions.InvalidArgument('Invalid processor')
+            elif not (inputdev in QEMUDevices.inputs.keys()):
+                raise Exceptions.InvalidArgument('Invalid input device')
             
             self.db_object().memory    = memory
             self.db_object().sockets   = sockets
@@ -1282,7 +1294,7 @@ class Vertibird(object):
             self.db_object().floppy    = floppy
             self.db_object().scsi      = scsi
             self.db_object().numa      = numa
-            self.db_object().usbinput  = usbinput
+            self.db_object().inputdev  = inputdev
             self.db_object().rtc       = rtc
             self.db_session().commit()
         
@@ -1746,7 +1758,7 @@ class Vertibird(object):
         scsi       = Column(String, default = 'lsi53c895a')
         rtc        = Column(String, default = 'utc')
         floppy     = Column(String)
-        usbinput   = Column(Boolean, default = False)
+        inputdev   = Column(String, default = 'ps2')
         numa       = Column(Boolean, default = False)
         cdroms     = Column(PickleType, default = [])
         drives     = Column(PickleType, default = [])
@@ -1924,7 +1936,7 @@ if __name__ == '__main__':
             options['vga'] = 'vmware-svga'
             options['scsi'] = 'lsi53c895a'
             options['floppy'] = None
-            options['usbinput'] = False
+            options['inputdev'] = 'usb-mouse'
             y.set_properties(options)
                         
         try:
