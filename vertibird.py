@@ -117,6 +117,7 @@ GLOBAL_THREAD_POOL = []
 
 class QEMUDevices(object):
     vga_arg = {
+        # Deprecated
         'none': 'No Graphics',
         'std': 'Standard VGA',
         'cirrus': 'Cirrus VGA',
