@@ -69,10 +69,6 @@ __all__ = [
 # TODO: Add disk cloning, although you could just copy the backing file
 # [POTENTIALLY OUT OF SCOPE]
 
-# TODO: Deal with SQLite/Alchemy exception whenever thread is garbage
-# collected (different threads, etc)
-# Maybe delete session for thread every commit and recreate it when needed?
-
 # Connection details (note: QEMU_VNC_ADDS is related to a quirk with QEMU)
 GLOBAL_LOOPBACK = '127.0.0.1'
 QEMU_VNC_ADDS = 5900
@@ -311,10 +307,19 @@ class Vertibird(object):
     def __init__(
                 self,
                 qemu: str = 'qemu-kvm',
-                persistence: str = 'sqlite:///vertibird.db'
+                persistence: str = (
+                    'sqlite:///vertibird.db' +
+                    '?check_same_thread=False'
+                )
             ):
         """
         Create a Vertibird hypervisor interface.
+        
+        If using SQLite...
+         - Ensure that check_same_thread is set to False, otherwise SQLite will
+        throw exceptions whenever a connection is garbage collected even
+        though each database connection is stored thread-locally anyway. There
+        is no risk to enabling this option.
         
         Parameters
         ----------
@@ -331,25 +336,24 @@ class Vertibird(object):
                 'Only Linux is supported.'
             )
         
+        self._local = threading.local()
+        
         self.qemu = qemu
         self.db_info = persistence
-        self.db_instances = {}
         self.vm_instances = {}
     
     def db(self):
-        thread = threading.get_ident()
-        
-        if not (thread in self.db_instances):
+        if not hasattr(self._local, 'db'):
             engine = create_engine(
                 self.db_info,
                 isolation_level='READ UNCOMMITTED'
             )
             self.Base.metadata.create_all(engine)
-            self.db_instances[thread] = (sessionmaker(
+            self._local.db = (sessionmaker(
                 bind = engine
             ))()
             
-        return self.db_instances[thread]
+        return self._local.db
     
     def create(self):
         """
@@ -745,10 +749,10 @@ class Vertibird(object):
             object to self.display. This will allow you to interact with the VM
             """
             
+            self._local     = threading.local()
             self.id         = vuuid
             self.vertibird  = vertibird
             self.db_session = vertibird.db
-            self.db_objects = {}
             self.db_object  = self.__get_db_object
             self.display    = self.VMDisplay(self)
             
@@ -1678,10 +1682,8 @@ class Vertibird(object):
                 )
                 
         def __get_db_object(self):
-            thread = threading.get_ident()
-            
-            if not (thread in self.db_objects):
-                self.db_objects[thread] = {
+            if not hasattr(self._local, 'dbobj'):
+                self._local.dbobj = {
                     'object': self.db_session().query(
                         self.vertibird.VertiVM
                     ).filter(
@@ -1691,19 +1693,12 @@ class Vertibird(object):
                     'lease': time.time()
                 }
                 
-                try:
-                    for key in self.db_objects.keys():
-                        if not self.vertibird._check_thread_id_alive(key):
-                            del self.db_objects[key]
-                except:
-                    pass
+            if (time.time() - self._local.dbobj['lease']) > DB_CINTERVAL:
+                self._local.dbobj['session'].expire_all()
+                self._local.dbobj['session'].commit()
+                self._local.dbobj['lease'] = time.time()
                 
-            if (time.time() - self.db_objects[thread]['lease']) > DB_CINTERVAL:
-                self.db_objects[thread]['session'].expire_all()
-                self.db_objects[thread]['session'].commit()
-                self.db_objects[thread]['lease'] = time.time()
-                
-            return self.db_objects[thread]['object']
+            return self._local.dbobj['object']
     
     class VertiVM(Base):
         """
