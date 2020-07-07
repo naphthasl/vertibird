@@ -38,7 +38,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm.exc import ObjectDereferencedError
 
 __author__ = 'Naphtha Nepanthez'
-__version__ = '0.0.9'
+__version__ = '0.0.10'
 __license__ = 'MIT' # SEE LICENSE FILE
 __all__ = [
     'Vertibird',
