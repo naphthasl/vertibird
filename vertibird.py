@@ -19,7 +19,7 @@ License: MIT (see LICENSE for details)
 
 import shelve, threading, time, uuid, socket, subprocess, os, telnetlib, signal
 import sys, shlex, random, string, psutil, zlib, builtins, select, tempfile, io
-import ipaddress, zmq, collections, traceback
+import ipaddress, zmq, collections, traceback, multiprocessing
 
 from contextlib import closing
 
@@ -38,7 +38,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm.exc import ObjectDereferencedError
 
 __author__ = 'Naphtha Nepanthez'
-__version__ = '0.0.10'
+__version__ = '0.0.11'
 __license__ = 'MIT' # SEE LICENSE FILE
 __all__ = [
     'Vertibird',
@@ -103,7 +103,7 @@ BLANK_WAV_HEADER =\
     b'RIFF\x00\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01'\
     b'\x00\x02\x00D\xac\x00\x00\x10\xb1\x02\x00\x04\x00'\
     b'\x10\x00data\x00\x00\x00\x00'
-GLOBAL_THREAD_POOL = []
+GLOBAL_LOCK = multiprocessing.Lock()
 
 class QEMUDevices(object):
     vga_arg = {
@@ -859,7 +859,9 @@ class Vertibird(object):
             if the virtual machine is already running.
             """
             
-            if self.state() == 'offline':
+            with GLOBAL_LOCK:
+                self.__set_option_offline()
+            
                 self.__randomize_ports()
                 
                 # Remove audio pipe file just in case it wasn't cleared
@@ -870,7 +872,9 @@ class Vertibird(object):
                     except OSError:
                         pass # Already removed
                 
-                self.db_object().audiopipe = self.__get_temp(suffix = '.pipe')
+                self.db_object().audiopipe = self.__get_temp(
+                    suffix = '.pipe'
+                )
                 
                 self.db_session().commit()
                 os.unlink(self.db_object().audiopipe)
@@ -894,7 +898,7 @@ class Vertibird(object):
                         self.db_object().ports['vnc'] - QEMU_VNC_ADDS
                     ),
                     '-display',
-                    'egl-headless', # Needs more testing, but should allow 3D
+                    'egl-headless', # Potentially allows 3D
                     '-m',
                     '{0}B'.format(self.db_object().memory),
                     '-overcommit',
@@ -924,22 +928,22 @@ class Vertibird(object):
                     ),
                     '-enable-kvm',
                     '-sandbox',
-                    ('on,obsolete=deny,elevateprivileges=deny,spawn=deny,' +
+                    ('on,obsolete=deny,elevateprivileges=deny,spawn=deny,'+
                     'resourcecontrol=deny'),
                     '-rtc',
                     'base={0},clock=host,driftfix=slew'.format(
                         self.__argescape(self.db_object().rtc)
                     ),
                     '-device',
-                    # I had to remove escaping for the VGA device because some
-                    # of them have optional properties (like ati-vga and
-                    # virtio-gpu) that allow for important features that
-                    # un-privileged users should have access to. Luckily this
-                    # doesn't really matter (unless the SQLite database is
-                    # compromised) because the name of the VGA device is
-                    # checked against the list of available VGA devices and
-                    # variations when you set it anyway, and it will raise an
-                    # exception if the device is invalid.
+                    # I had to remove escaping for the VGA device because
+                    # some of them have optional properties (like ati-vga
+                    # and virtio-gpu) that allow for important features
+                    # that un-privileged users should have access to.
+                    # Luckily this doesn't really matter (unless the SQLite
+                    # database is compromised) because the name of the VGA
+                    # device is checked against the list of available VGA
+                    # devices and variations when you set it anyway, and it
+                    # will raise an exception if the device is invalid.
                     self.db_object().vga,
                     '-audiodev',
                     'wav,path={0},id=audioout'.format(
@@ -964,11 +968,12 @@ class Vertibird(object):
                         ])
                     ),
                     '-smbios',
-                    'type=0,vendor="American Megatrends Inc.",version=B.40,' +
-                    'date=11/07/2019,release=5.14,uefi=off',
+                    ('type=0,vendor="American Megatrends Inc.",version=' +
+                    'B.40,date=11/07/2019,release=5.14,uefi=off'),
                     '-smbios',
-                    'type=1,manufacturer="Gigabyte Technology Co. Ltd"' +
-                    ',product=MS-7A38,uuid={0},version=8.0,serial={1}'.format(
+                    ('type=1,manufacturer="Gigabyte Technology Co. Ltd"' +
+                    ',product=MS-7A38,uuid={0},version=8.0,' +
+                    'serial={1}').format(
                         self.__argescape(self.id),
                         self.__argescape('To be filled by O.E.M.')
                     )
@@ -1012,17 +1017,19 @@ class Vertibird(object):
                             'usb-kbd,id=input1'
                         ]
                 else:
-                    if not (self.db_object().sound in ['adlib','sb16','gus']):
+                    if not (self.db_object().sound in [
+                            'adlib','sb16','gus'
+                        ]):
                         raise Exceptions.InvalidGenericDeviceType(
-                            'ISA-Only PC requires an ISA-specific audio device'
+                            'ISA-Only PC requires an ISA audio device'
                         )
                     elif not (self.db_object().network in ['ne2k_isa']):
                         raise Exceptions.InvalidGenericDeviceType(
-                            'ISA-Only PC requires an ISA-specific NIC device'
+                            'ISA-Only PC requires an ISA NIC device'
                         )
                     elif not ('isa' in self.db_object().vga):
                         raise Exceptions.InvalidGenericDeviceType(
-                            'ISA-Only PC requires an ISA-specific VGA device'
+                            'ISA-Only PC requires an ISA VGA device'
                         )
                     elif self.db_object().cores > 1:
                         raise Exceptions.InvalidGenericDeviceType(
@@ -1043,7 +1050,9 @@ class Vertibird(object):
                 if self.db_object().numa == True:
                     arguments.append('-numa')
                 
-                if self.db_object().sound in ['ac97', 'adlib', 'sb16', 'gus']:
+                if self.db_object().sound in [
+                        'ac97', 'adlib', 'sb16', 'gus'
+                    ]:
                     arguments += [
                         '-device',
                         '{0},audiodev=audioout'.format(
@@ -1100,13 +1109,14 @@ class Vertibird(object):
                                 and drive['type'] != 'ide'
                             ):
                             raise Exceptions.InvalidGenericDeviceType(
-                                'Only IDE devices are supported on ISA-Only PC'
+                                'Only IDE is supported on ISA-Only PC'
                             )
                         
                         if drive['type'] in ['ahci', 'ide', 'scsi']:
                             arguments += [
                                 '-drive',
-                                'id={0},file={1},if=none,format={2}'.format(
+                                ('id={0},file={1},if=none,' +
+                                'format={2}').format(
                                     internal_id,
                                     self.__argescape(
                                         os.path.abspath(drive['path'])
@@ -1116,7 +1126,8 @@ class Vertibird(object):
                                 '-device',
                                 {
                                     'ahci': '{3},drive={0},bus={1}.0',
-                                    'ide': '{3},drive={0},bus={1}.0,unit={2}',
+                                    'ide': ('{3},drive={0},bus={1}.0' +
+                                    ',unit={2}'),
                                     'scsi': '{3},drive={0},bus={1}.0'
                                 }[drive['type']].format(
                                     internal_id,
@@ -1134,7 +1145,8 @@ class Vertibird(object):
                         elif drive['type'] == 'virtio':
                             arguments += [
                                 '-drive',
-                                'id={0},file={1},if=virtio,format={2}'.format(
+                                ('id={0},file={1},if=virtio' + 
+                                ',format={2}').format(
                                     internal_id,
                                     self.__argescape(
                                         os.path.abspath(drive['path'])
@@ -1144,10 +1156,12 @@ class Vertibird(object):
                             ]
                         else:
                             raise Exceptions.InvalidGenericDeviceType(
-                                'Drive type must be virtio, scsi, ahci or ide.'
+                                'Invalid storage device type.'
                             )
                     else:
-                        raise Exceptions.LaunchDependencyMissing(drive['path'])
+                        raise Exceptions.LaunchDependencyMissing(
+                            drive['path']
+                        )
                 
                 if strdevices > 2:
                     raise Exceptions.LimitReached(
@@ -1189,10 +1203,6 @@ class Vertibird(object):
                         'The virtual machine was unable to launch. ' +
                         'Check the log for more information.'
                     )
-            else:
-                raise Exceptions.InvalidStateChange(
-                    'Invalid state for start()!'
-                )
         
         def get_log(self):
             """
@@ -1531,19 +1541,20 @@ class Vertibird(object):
             Terminates the virtual machine.
             """
             
-            self.__check_running()
-            
-            try:
-                self.__send_monitor_command('quit')
-            except:
-                pass # Could not have initialized yet
-            
-            try:
-                os.kill(self.db_object().pid, signal.SIGINT)
-            except ProcessLookupError:
-                pass # Process does not exist
-            
-            self.state()
+            with GLOBAL_LOCK:
+                self.__check_running()
+                
+                try:
+                    self.__send_monitor_command('quit')
+                except:
+                    pass # Could not have initialized yet
+                
+                try:
+                    os.kill(self.db_object().pid, signal.SIGINT)
+                except ProcessLookupError:
+                    pass # Process does not exist
+                
+                self.state()
             
         def state(self, vnc_connecting: bool = False) -> str:
             """
