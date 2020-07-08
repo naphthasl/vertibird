@@ -38,7 +38,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm.exc import ObjectDereferencedError
 
 __author__ = 'Naphtha Nepanthez'
-__version__ = '0.0.11'
+__version__ = '0.0.12'
 __license__ = 'MIT' # SEE LICENSE FILE
 __all__ = [
     'Vertibird',
@@ -844,7 +844,7 @@ class Vertibird(object):
             
             try:
                 self.stop()
-            except self.InvalidStateChange:
+            except Exceptions.InvalidStateChange:
                 pass # Already offline
             
             if self.display.connected:
