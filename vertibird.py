@@ -38,7 +38,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm.exc import ObjectDereferencedError
 
 __author__ = 'Naphtha Nepanthez'
-__version__ = '0.0.13'
+__version__ = '0.0.14'
 __license__ = 'MIT' # SEE LICENSE FILE
 __all__ = [
     'Vertibird',
@@ -342,16 +342,23 @@ class Vertibird(object):
         self.db_info = persistence
         self.vm_instances = {}
     
+    def __new_db(self):
+        engine = create_engine(
+            self.db_info,
+            isolation_level='READ UNCOMMITTED'
+        )
+        self.Base.metadata.create_all(engine)
+        self._local.db = (sessionmaker(
+            bind = engine
+        ))()
+    
     def db(self):
         if not hasattr(self._local, 'db'):
-            engine = create_engine(
-                self.db_info,
-                isolation_level='READ UNCOMMITTED'
-            )
-            self.Base.metadata.create_all(engine)
-            self._local.db = (sessionmaker(
-                bind = engine
-            ))()
+            self.__new_db()
+        
+        if not self._local.db.is_active:
+            self._local.db.close()
+            self.__new_db()
             
         return self._local.db
     
