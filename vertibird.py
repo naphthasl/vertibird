@@ -1729,17 +1729,23 @@ class Vertibird(object):
                     'Function requires VM to be online'
                 )
                 
+        def __get_new_db_object(self):
+            self._local.dbobj = {
+                'object': self.db_session().query(
+                    self.vertibird.VertiVM
+                ).filter(
+                    self.vertibird.VertiVM.id == self.id
+                ).one(),
+                'session': self.db_session(),
+                'lease': time.time()
+            }
+                
         def __get_db_object(self):
             if not hasattr(self._local, 'dbobj'):
-                self._local.dbobj = {
-                    'object': self.db_session().query(
-                        self.vertibird.VertiVM
-                    ).filter(
-                        self.vertibird.VertiVM.id == self.id
-                    ).one(),
-                    'session': self.db_session(),
-                    'lease': time.time()
-                }
+                self.__get_new_db_object()
+                
+            if not self._local.dbobj['session'].is_active:
+                self.__get_new_db_object()
                 
             if (time.time() - self._local.dbobj['lease']) > DB_CINTERVAL:
                 self._local.dbobj['session'].expire_all()
