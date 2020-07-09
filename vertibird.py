@@ -38,7 +38,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm.exc import ObjectDereferencedError
 
 __author__ = 'Naphtha Nepanthez'
-__version__ = '0.0.14'
+__version__ = '0.0.15'
 __license__ = 'MIT' # SEE LICENSE FILE
 __all__ = [
     'Vertibird',
@@ -356,7 +356,10 @@ class Vertibird(object):
         if not hasattr(self._local, 'db'):
             self.__new_db()
         
-        if not self._local.db.is_active:
+        if ((not self._local.db.is_active)
+            or self._local.db.connection().closed
+            or self._local.db.deleted):
+                
             self._local.db.close()
             self.__new_db()
             
@@ -1744,11 +1747,14 @@ class Vertibird(object):
             if not hasattr(self._local, 'dbobj'):
                 self.__get_new_db_object()
                 
-            if not self._local.dbobj['session'].is_active:
+            if ((not self._local.dbobj['session'].is_active)
+                or self._local.dbobj['session'].connection().closed
+                or self._local.dbobj['session'].deleted):
+                    
+                self._local.dbobj['session'].close()
                 self.__get_new_db_object()
                 
             if (time.time() - self._local.dbobj['lease']) > DB_CINTERVAL:
-                self._local.dbobj['session'].expire_all()
                 self._local.dbobj['session'].commit()
                 self._local.dbobj['lease'] = time.time()
                 
