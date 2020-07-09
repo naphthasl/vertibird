@@ -1907,8 +1907,6 @@ if __name__ == '__main__':
     def main():
         global DEBUG
         DEBUG = True
-        global DISK_FORMAT
-        DISK_FORMAT = 'qcow2'
         
         x = local()
         
@@ -1925,51 +1923,33 @@ if __name__ == '__main__':
             for fwd in y.list_forwardings():
                 y.remove_forwarding(fwd['id'])
             
-            #y.attach_cdrom(
-            #    '/home/naphtha/Downloads/ubuntu-20.04-desktop-amd64.iso'
-            #)
+            y.attach_cdrom(
+                '/home/rodger/TempleOS.ISO'
+            )
             
             dsize = 34359738368
             drives = './drives/'
-            backing = os.path.join(drives, 'win10.qcow2')
+            backing = os.path.join(drives, 'temple.qcow2')
             
-            try:
-                x.create_drive(
-                    backing,
-                    dsize
-                )
-            except Exceptions.DriveAlreadyExists:
-                pass
-            
-            """
-            try:
-                x.create_snapshot(
-                    snapshot,
-                    backing,
-                    dsize - os.path.getsize(backing)
-                )
-            except Exceptions.DriveAlreadyExists:
-                pass
-            """
-            
-            y.attach_drive(
+            y.create_or_attach_drive(
                 backing,
-                'ahci'
+                dsize,
+                'ide'
             )
             
             options = y.get_properties()
             options['machine'] = 'pc'
-            options['memory'] = 8589934592
-            options['cpu'] = 'EPYC-IBPB'
+            options['memory'] = 536870912
+            options['cpu'] = 'host'
             options['sockets'] = 1
-            options['cores'] = 6
-            options['threads'] = 2
-            options['network'] = 'e1000'
-            options['sound'] = 'hda'
-            options['vga'] = 'vmware-svga'
+            options['cores'] = 1
+            options['threads'] = 1
+            options['network'] = 'ne2k_isa'
+            options['sound'] = 'adlib'
+            options['vga'] = 'VGA'
             options['scsi'] = 'lsi53c895a'
             options['floppy'] = None
-            options['inputdev'] = 'usb-mouse'
+            options['inputdev'] = 'ps2'
             y.set_properties(options)
                         
         try:
@@ -2041,6 +2021,16 @@ if __name__ == '__main__':
             #i = (lambda i: 'None' if bool(i) == False else i)(input('>>> '))
             #print(eval(i))
         """
+        
+        i = ''
+        while i.strip() != 'exit()':
+            try:
+                i = (lambda i: 'None' if bool(i) == False else i)(
+                    input('>>> ')
+                )
+                print(eval(i))
+            except Exception as e:
+                traceback.print_exc()
         
         y.wait()
         
