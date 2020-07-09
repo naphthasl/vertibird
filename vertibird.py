@@ -38,7 +38,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm.exc import ObjectDereferencedError
 
 __author__ = 'Naphtha Nepanthez'
-__version__ = '0.0.16'
+__version__ = '0.0.17'
 __license__ = 'MIT' # SEE LICENSE FILE
 __all__ = [
     'Vertibird',
@@ -813,7 +813,7 @@ class Vertibird(object):
                 
                 while self.state(vnc_connecting = True) != 'offline':
                     if not self.__check_main_thread():
-                        return
+                        break
                     
                     try:
                         if not os.path.exists(
