@@ -38,7 +38,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm.exc import ObjectDereferencedError
 
 __author__ = 'Naphtha Nepanthez'
-__version__ = '0.0.15'
+__version__ = '0.0.16'
 __license__ = 'MIT' # SEE LICENSE FILE
 __all__ = [
     'Vertibird',
@@ -1582,36 +1582,39 @@ class Vertibird(object):
             
         def _state_check(self, vnc_connecting: bool = False):
             # Check if QEMU instance is actually still running
-            if self.db_object().state != 'offline':
-                try:
-                    x = psutil.Process(self.db_object().pid)
-                    
-                    # Process ID may have been reclaimed
-                    if not (self.id in x.cmdline()):
-                        raise psutil.NoSuchProcess(self.db_object().pid)
-                    
-                    # Process may not immediately end
-                    if x.status() == 'zombie':
+            try:
+                pid = self.db_object().pid
+                x = psutil.Process(pid)
+                
+                # Process ID may have been reclaimed
+                if not (self.id in x.cmdline()):
+                    raise psutil.NoSuchProcess(pid)
+                
+                # Process may not immediately end
+                if x.status() == 'zombie':
+                    try:
                         x.kill()
-                        
-                        raise psutil.NoSuchProcess(self.db_object().pid)
-                except psutil.NoSuchProcess:
-                    pass
-                else:
-                    if not vnc_connecting:
-                        if self.display.connected == False:
-                            self.display.connect()
-                        
-                    if self.db_object().audiothrd == False:
-                        self.db_object().audiothrd = True
-                        self.db_session().commit()
-                        
-                        threading.Thread(
-                            target = self.__audio_thread,
-                            daemon = False
-                        ).start()
+                    except:
+                        pass
                     
-                    return
+                    raise psutil.NoSuchProcess(pid)
+            except psutil.NoSuchProcess:
+                pass
+            else:
+                if not vnc_connecting:
+                    if self.display.connected == False:
+                        self.display.connect()
+                    
+                if self.db_object().audiothrd == False:
+                    self.db_object().audiothrd = True
+                    self.db_session().commit()
+                    
+                    threading.Thread(
+                        target = self.__audio_thread,
+                        daemon = False
+                    ).start()
+                
+                return
             
             self.__mark_offline()
             
