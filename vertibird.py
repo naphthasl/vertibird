@@ -1900,6 +1900,7 @@ if __name__ == '__main__':
     import pyaudio
     import wave
     import queue
+    import code
     
     vspawner = SessionManager()
     local = vspawner.local
@@ -1997,9 +1998,11 @@ if __name__ == '__main__':
         def testthread(y):
             print(y.state())
 
-        threading.Thread(
-            target = audplay, args = (y,), daemon = True
-        ).start()
+        apb = input('Audio (Y/N): ')
+        if apb.strip().lower() == 'y':
+            threading.Thread(
+                target = audplay, args = (y,), daemon = True
+            ).start()
         
         threading.Thread(
             target = logplay, args = (y,), daemon = True
@@ -2022,6 +2025,7 @@ if __name__ == '__main__':
             #print(eval(i))
         """
         
+        """
         i = ''
         while i.strip() != 'exit()':
             try:
@@ -2031,6 +2035,8 @@ if __name__ == '__main__':
                 print(eval(i))
             except Exception as e:
                 traceback.print_exc()
+        """
+        code.interact(local=dict(globals(), **locals()))
         
         y.wait()
         
