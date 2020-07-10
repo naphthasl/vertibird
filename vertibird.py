@@ -1924,7 +1924,7 @@ if __name__ == '__main__':
                 y.remove_forwarding(fwd['id'])
             
             y.attach_cdrom(
-                '/home/rodger/TempleOS.ISO'
+                os.path.expanduser('~/TempleOS.ISO')
             )
             
             dsize = 34359738368
