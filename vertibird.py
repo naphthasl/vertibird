@@ -678,11 +678,11 @@ class Vertibird(object):
                         (255, 255, 0)
                     )
                     
-                    self.connect()
+                    self.connect(captue = False)
                     
                     return offline_message
             
-            def connect(self):
+            def connect(self, capture: bool = True):
                 # You do not need to call this, it is already called when a VM
                 # starts or is detected to be online.
                 
@@ -690,7 +690,7 @@ class Vertibird(object):
                 start_time = time.time()
                 
                 while (self.client == None
-                        or (time.time() - start_time) > VNC_TIMEOUT_SECS
+                        and (time.time() - start_time) < VNC_TIMEOUT_SECS
                     ) and (self.vmlive.state(
                         vnc_connecting = True
                     ) == 'online'):
@@ -709,7 +709,8 @@ class Vertibird(object):
                         self.keyDown = self.client.keyDown
                         self.keyUp = self.client.keyUp
                         
-                        self.capture(force = True)
+                        if capture:
+                            self.capture(force = True)
                         
                         self.connected = True
                     except (
@@ -1202,12 +1203,11 @@ class Vertibird(object):
                 self.db_session().commit()
                 
                 self.state()
-                self.display.connect()
                 
                 time.sleep(STATE_CHECK_NRLT_CLK_SECS)
                 
                 if not (process.returncode in [None, 0]):
-                    self.state()
+                    self.__mark_offline()
                     
                     raise Exceptions.VMLaunchException(
                         'The virtual machine was unable to launch. ' +
@@ -1602,17 +1602,17 @@ class Vertibird(object):
                 pass
             else:
                 if not vnc_connecting:
+                    if self.db_object().audiothrd == False:
+                        self.db_object().audiothrd = True
+                        self.db_session().commit()
+                        
+                        threading.Thread(
+                            target = self.__audio_thread,
+                            daemon = False
+                        ).start()
+                    
                     if self.display.connected == False:
                         self.display.connect()
-                    
-                if self.db_object().audiothrd == False:
-                    self.db_object().audiothrd = True
-                    self.db_session().commit()
-                    
-                    threading.Thread(
-                        target = self.__audio_thread,
-                        daemon = False
-                    ).start()
                 
                 return
             
