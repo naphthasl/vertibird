@@ -27,7 +27,8 @@ setup(name='vertibird',
         'psutil',
         'filelock',
         'pyzmq',
-        'python-dateutil'
+        'python-dateutil',
+        'yunyundb'
     ],
     platforms='any',
     python_requires='>=3.6',
