@@ -1930,7 +1930,6 @@ if __name__ == '__main__':
             target = testthread, args = (y,), daemon = True
         ).start()
         
-        """
         while y.state() == 'online':
             z = imgGet()
                 
@@ -1939,7 +1938,6 @@ if __name__ == '__main__':
             
             #i = (lambda i: 'None' if bool(i) == False else i)(input('>>> '))
             #print(eval(i))
-        """
         
         """
         i = ''
