@@ -1841,11 +1841,9 @@ if __name__ == '__main__':
             for fwd in y.list_forwardings():
                 y.remove_forwarding(fwd['id'])
             
-            """
             y.attach_cdrom(
-                os.path.expanduser('~/TempleOS.ISO')
+                os.path.expanduser('~/iso/win7x86.iso')
             )
-            """
             
             dsize = 34359738368
             drives = './drives/'
