@@ -31,7 +31,7 @@ from datetime import datetime
 from yunyun import Shelve
 
 __author__ = 'Naphtha Nepanthez'
-__version__ = '0.1.0'
+__version__ = '0.1.1'
 __license__ = 'MIT' # SEE LICENSE FILE
 __all__ = [
     'Vertibird',
@@ -63,6 +63,7 @@ QEMU_VNC_ADDS = 5900
 # Connection timeouts
 TELNET_TIMEOUT_SECS = 1
 VNC_TIMEOUT_SECS = TELNET_TIMEOUT_SECS
+STARTUP_TIMEOUT = 4
 
 # Realtime state check and non-realtime state check poll times
 STATE_CHECK_CLK_SECS = 0.075
@@ -339,7 +340,6 @@ class Vertibird(object):
             'pid'        : None,
             'audiopipe'  : None,
             'audiothrd'  : False,
-            'state'      : 'offline',
             'memory'     : 134217728,
             'sockets'    : 1,
             'cores'      : 1,
@@ -1180,19 +1180,21 @@ class Vertibird(object):
                 pid = process.pid
                 
                 self.setDBProperty('pid', pid)
-                self.setDBProperty('state', 'online')
                 
-                self.state()
-                
-                time.sleep(STATE_CHECK_NRLT_CLK_SECS)
-                
-                if not (process.returncode in [None, 0]):
-                    self.__mark_offline()
+                start = time.time()
+                while ((time.time() - start) < STARTUP_TIMEOUT):
+                    nstate = self.state()
                     
-                    raise Exceptions.VMLaunchException(
-                        'The virtual machine was unable to launch. ' +
-                        'Check the log for more information.'
-                    )
+                    if nstate == 'online':
+                        break
+                
+                    if not (process.returncode in [None, 0]):
+                        self.__mark_offline()
+                        
+                        raise Exceptions.VMLaunchException(
+                            'The virtual machine was unable to launch. ' +
+                            'Check the log for more information.'
+                        )
         
         def get_log(self):
             """
@@ -1546,9 +1548,7 @@ class Vertibird(object):
                 The current VM state, can be "offline" or "online"
             """
             
-            self._state_check(vnc_connecting)
-            
-            return self.getDBProperty('state')
+            return self._state_check(vnc_connecting)
             
         def _state_check(self, vnc_connecting: bool = False):
             # Check if QEMU instance is actually still running
@@ -1576,8 +1576,6 @@ class Vertibird(object):
             except psutil.NoSuchProcess:
                 pass
             else:
-                self.setDBProperty('state', 'online')
-                
                 if not vnc_connecting:
                     if self.getDBProperty('audiothrd') == False:
                         self.setDBProperty('audiothrd', True)
@@ -1590,21 +1588,27 @@ class Vertibird(object):
                     if self.display.connected == False:
                         self.display.connect()
                 
-                return
+                return 'online'
             
             try:
                 del self._cache['pid']
             except KeyError:
                 pass
             
+            if not vnc_connecting:
+                nt = self._state_check(vnc_connecting = True)
+                if nt == 'online':
+                    return nt
+            
             self.__mark_offline()
+            
+            return 'offline'
             
         def __mark_offline(self):
             self.__file_cleanup()
             
             self.setDBProperty('audiothrd', False)
             self.setDBProperty('pid', None)
-            self.setDBProperty('state', 'offline')
             
             try:
                 self.display.disconnect()
@@ -1876,7 +1880,7 @@ if __name__ == '__main__':
         
         print('Start non-blocking')
 
-        time.sleep(1)
+        #time.sleep(2)
         y.state()
 
         imgGet = (lambda: cv2.cvtColor(np.asarray(
@@ -1891,7 +1895,7 @@ if __name__ == '__main__':
                             output=True)
             aud = y.display.getAudio()
             
-            while y.state():
+            while y.state() == 'online':
                 grab = aud.read()
                 
                 wf = wave.open(io.BytesIO(grab))
@@ -1906,7 +1910,7 @@ if __name__ == '__main__':
             
         def logplay(y):
             logfile = y.get_log()
-            while True:
+            while y.state() == 'online':
                 line = logfile.readline()
                 if not line:
                     time.sleep(STATE_CHECK_CLK_SECS)
@@ -1953,5 +1957,9 @@ if __name__ == '__main__':
         # code.interact(local=dict(globals(), **locals()))
         
         y.wait()
+            
+        print(threading.enumerate())
+            
+        sys.exit()
             
     main()
