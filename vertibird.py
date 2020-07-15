@@ -30,14 +30,6 @@ from dateutil.tz import tzlocal
 from datetime import datetime
 from yunyun import Shelve
 
-from sqlalchemy import create_engine
-from sqlalchemy import Column, Integer, String, PickleType, Boolean
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.orm import scoped_session
-from sqlalchemy.exc import InvalidRequestError
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm.exc import ObjectDereferencedError
-
 __author__ = 'Naphtha Nepanthez'
 __version__ = '0.1.0'
 __license__ = 'MIT' # SEE LICENSE FILE
@@ -97,7 +89,7 @@ VNC_NO_SIGNAL_MESSAGE = 'Unable to retrieve frames from VNC server right now.'
 
 # Debugging
 DEBUG = False
-EXPERIMENTAL_SHARED_INSTANCES = False
+EXPERIMENTAL_SHARED_INSTANCES = True
 
 # Module requirements
 BLANK_WAV_HEADER =\
@@ -302,8 +294,6 @@ class Vertibird(object):
     Just ALWAYS remember that anything you input will be converted into
     commandline arguments for QEMU.
     """
-    
-    Base = declarative_base()
 
     def __init__(
                 self,
@@ -668,7 +658,7 @@ class Vertibird(object):
                         (255, 255, 0)
                     )
                     
-                    self.connect(captue = False)
+                    self.connect(capture = False)
                     
                     return offline_message
             
@@ -788,49 +778,51 @@ class Vertibird(object):
             Automatically converts the named pipe into a ZMQ broadcast.
             """
 
-            try:
-                while self.state(vnc_connecting = True) == 'offline':
-                    if not self.__check_main_thread():
-                        return
-                    
-                    time.sleep(STATE_CHECK_CLK_SECS)
-                
-                context = zmq.Context()
-                socket = context.socket(zmq.PUB)
-                
-                ftr = self.getDBProperty('audiopipe')
-                bindport = self.getDBProperty('ports')['audio']
-                
+            ftr = self.getDBProperty('audiopipe')
+            with FileLock(ftr + '.lock'):
                 try:
-                    socket.bind('tcp://{0}:{1}'.format(
-                        GLOBAL_LOOPBACK,
-                        bindport
-                    ))
+                    while self.state(vnc_connecting = True) == 'offline':
+                        if not self.__check_main_thread():
+                            return
+                        
+                        time.sleep(STATE_CHECK_CLK_SECS)
                     
-                    f = open(ftr, 'rb')
-                except (zmq.error.ZMQError, FileNotFoundError):
-                    return
-                
-                while self.state(vnc_connecting = True) != 'offline':
-                    if not self.__check_main_thread():
-                        break
+                    context = zmq.Context()
+                    socket = context.socket(zmq.PUB)
+                    
+                    bindport = self.getDBProperty('ports')['audio']
                     
                     try:
-                        if not os.path.exists(
-                                ftr
-                            ):
-                            raise FileNotFoundError('Pipe missing')
+                        socket.bind('tcp://{0}:{1}'.format(
+                            GLOBAL_LOOPBACK,
+                            bindport
+                        ))
                         
-                        p = f.read(AUDIO_BLOCK_SIZE)
+                        f = open(ftr, 'rb')
+                    except (zmq.error.ZMQError, FileNotFoundError):
+                        return
+                    
+                    while self.state(vnc_connecting = True) != 'offline':
+                        if not self.__check_main_thread():
+                            break
                         
-                        socket.send(p)
-                    except (FileNotFoundError, OSError):
-                        break
-                
-                socket.close()
-                f.close()
-            except Exception as e:
-                traceback.print_exc()
+                        try:
+                            if not os.path.exists(
+                                    ftr
+                                ):
+                                raise FileNotFoundError('Pipe missing')
+                            
+                            p = f.read(AUDIO_BLOCK_SIZE)
+                            
+                            socket.send(p)
+                        except (FileNotFoundError, OSError):
+                            break
+                    
+                    socket.close()
+                    f.close()
+                except Exception as e:
+                    traceback.print_exc()
+            os.remove(ftr + '.lock')
             
             self.setDBProperty('audiothrd', False)
 
@@ -864,19 +856,13 @@ class Vertibird(object):
             Starts the virtual machine's QEMU process. Will raise an exception
             if the virtual machine is already running.
             """
-            
+
             with GLOBAL_LOCK:
                 self.__set_option_offline()
             
                 self.__randomize_ports()
                 
-                # Remove audio pipe file just in case it wasn't cleared
-                # automatically last time
-                if self.getDBProperty('audiopipe') != None:
-                    try:
-                        os.unlink(self.getDBProperty('audiopipe'))
-                    except OSError:
-                        pass # Already removed
+                self.__mark_offline()
                 
                 adpfile = self.__get_temp(
                     suffix = '.pipe'
@@ -1590,6 +1576,8 @@ class Vertibird(object):
             except psutil.NoSuchProcess:
                 pass
             else:
+                self.setDBProperty('state', 'online')
+                
                 if not vnc_connecting:
                     if self.getDBProperty('audiothrd') == False:
                         self.setDBProperty('audiothrd', True)
@@ -1604,7 +1592,11 @@ class Vertibird(object):
                 
                 return
             
-            del self._cache['pid']
+            try:
+                del self._cache['pid']
+            except KeyError:
+                pass
+            
             self.__mark_offline()
             
         def __mark_offline(self):
@@ -1878,11 +1870,14 @@ if __name__ == '__main__':
                         
         try:
             # This tests if multi-processing is alright
-            y.start()
+            Vertibird().get(y.id).start()
         except Exceptions.InvalidStateChange:
             print('VM already running')
         
         print('Start non-blocking')
+
+        time.sleep(1)
+        y.state()
 
         imgGet = (lambda: cv2.cvtColor(np.asarray(
             y.display.capture().convert('RGB')
@@ -1958,8 +1953,5 @@ if __name__ == '__main__':
         # code.interact(local=dict(globals(), **locals()))
         
         y.wait()
-        
-        if y.state() == 'online':
-            y.stop()
             
     main()
