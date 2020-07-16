@@ -67,7 +67,7 @@ STARTUP_TIMEOUT = 4
 
 # Realtime state check and non-realtime state check poll times
 STATE_CHECK_CLK_SECS = 0.075
-STATE_CHECK_NRLT_CLK_SECS = 0.5
+STATE_CHECK_NRLT_CLK_SECS = 1
 DB_CINTERVAL = 0.2
 VNC_FRAMERATE = 60
 CPU_USAGE_INTERVAL = 1
@@ -543,8 +543,10 @@ class Vertibird(object):
                 def close(self):
                     self.active = False
                 
-                def __audio_get_thread(self):
-                    while self.active:
+                def __audio_get_thread(self, caller_thread):
+                    while self.active and caller_thread in map(
+                        lambda x: x.ident, threading.enumerate()
+                    ):
                         try:
                             context = zmq.Context()
                             sub = context.socket(zmq.SUB)
@@ -586,6 +588,7 @@ class Vertibird(object):
                     self.threads.append(
                         threading.Thread(
                             target = self.__audio_get_thread,
+                            args = (threading.get_ident(),),
                             daemon = True
                         )
                     )
@@ -750,17 +753,26 @@ class Vertibird(object):
             self.state()
             
         def setDBProperty(self, key: str, value):
+            start = time.time()
             with self.vertibird.db.mapping.lock:
                 props = self.vertibird.db[self.id]
                 props[key] = value
                 self.vertibird.db[self.id] = props
 
         def getDBProperty(self, key: str):
+            start = time.time()
             with self.vertibird.db.mapping.lock:
+                error = False
                 try:
-                    return self.vertibird.db[self.id][key]
+                    value = self.vertibird.db[self.id][key]
                 except KeyError:
-                    raise KeyError(key)
+                    error = True
+                    
+            # Do exception here instead to prevent funny issues
+            if error:
+                raise KeyError(key)
+                
+            return value
             
         def __del__(self):
             # Check state on exit/delete too, just in case.
@@ -812,9 +824,7 @@ class Vertibird(object):
                                 ):
                                 raise FileNotFoundError('Pipe missing')
                             
-                            p = f.read(AUDIO_BLOCK_SIZE)
-                            
-                            socket.send(p)
+                            socket.send(f.read(AUDIO_BLOCK_SIZE))
                         except (FileNotFoundError, OSError):
                             break
                     
@@ -1576,7 +1586,7 @@ class Vertibird(object):
             except psutil.NoSuchProcess:
                 pass
             else:
-                if not vnc_connecting:
+                if (not vnc_connecting) and self._preinit == False:
                     if self.getDBProperty('audiothrd') == False:
                         self.setDBProperty('audiothrd', True)
                         
@@ -1587,6 +1597,8 @@ class Vertibird(object):
                     
                     if self.display.connected == False:
                         self.display.connect()
+                        
+                    self._preinit = True
                 
                 return 'online'
             
@@ -1606,6 +1618,8 @@ class Vertibird(object):
             
         def __mark_offline(self):
             self.__file_cleanup()
+            
+            self._preinit = False
             
             self.setDBProperty('audiothrd', False)
             self.setDBProperty('pid', None)
@@ -1930,6 +1944,7 @@ if __name__ == '__main__':
             target = testthread, args = (y,), daemon = True
         ).start()
         
+        """
         while y.state() == 'online':
             z = imgGet()
                 
@@ -1938,6 +1953,7 @@ if __name__ == '__main__':
             
             #i = (lambda i: 'None' if bool(i) == False else i)(input('>>> '))
             #print(eval(i))
+        """
         
         """
         i = ''
@@ -1955,6 +1971,11 @@ if __name__ == '__main__':
         y.wait()
             
         print(threading.enumerate())
+        thread_names = {t.ident: t.name for t in threading.enumerate()}
+        for thread_id, frame in sys._current_frames().items():
+            print("Thread %s:" % thread_names.get(thread_id, thread_id))
+            traceback.print_stack(frame)
+            print()
             
         sys.exit()
             
