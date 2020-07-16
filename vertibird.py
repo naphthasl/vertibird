@@ -31,7 +31,7 @@ from datetime import datetime
 from yunyun import Shelve
 
 __author__ = 'Naphtha Nepanthez'
-__version__ = '0.1.2'
+__version__ = '0.1.3'
 __license__ = 'MIT' # SEE LICENSE FILE
 __all__ = [
     'Vertibird',
@@ -63,7 +63,7 @@ QEMU_VNC_ADDS = 5900
 # Connection timeouts
 TELNET_TIMEOUT_SECS = 1
 VNC_TIMEOUT_SECS = TELNET_TIMEOUT_SECS
-STARTUP_TIMEOUT = 4
+STARTUP_TIMEOUT = 8
 
 # Realtime state check and non-realtime state check poll times
 STATE_CHECK_CLK_SECS = 0.075
@@ -296,6 +296,12 @@ class Vertibird(object):
     commandline arguments for QEMU.
     """
 
+    # Shared between all instances
+    _locks = {
+        'start_stop': threading.Lock(),
+        'database'  : threading.Lock()
+    }
+
     def __init__(
                 self,
                 qemu: str = 'qemu-kvm',
@@ -327,11 +333,6 @@ class Vertibird(object):
         self.db_info = persistence
         self.db = Shelve(self.db_info)
         self.vm_instances = {}
-        
-        self._locks = {
-            'start_stop': threading.Lock(),
-            'database'  : threading.Lock()
-        }
     
     def create(self):
         """
