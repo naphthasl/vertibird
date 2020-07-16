@@ -327,6 +327,11 @@ class Vertibird(object):
         self.db_info = persistence
         self.db = Shelve(self.db_info)
         self.vm_instances = {}
+        
+        self._locks = {
+            'start_stop': threading.Lock(),
+            'database'  : threading.Lock()
+        }
     
     def create(self):
         """
@@ -753,26 +758,26 @@ class Vertibird(object):
             self.state()
             
         def setDBProperty(self, key: str, value):
-            start = time.time()
-            with self.vertibird.db.mapping.lock:
-                props = self.vertibird.db[self.id]
-                props[key] = value
-                self.vertibird.db[self.id] = props
+            with self.vertibird._locks['database']:
+                with self.vertibird.db.mapping.lock:
+                    props = self.vertibird.db[self.id]
+                    props[key] = value
+                    self.vertibird.db[self.id] = props
 
         def getDBProperty(self, key: str):
-            start = time.time()
-            with self.vertibird.db.mapping.lock:
-                error = False
-                try:
-                    value = self.vertibird.db[self.id][key]
-                except KeyError:
-                    error = True
+            with self.vertibird._locks['database']:
+                with self.vertibird.db.mapping.lock:
+                    error = False
+                    try:
+                        value = self.vertibird.db[self.id][key]
+                    except KeyError:
+                        error = True
+                        
+                # Do exception here instead to prevent funny issues
+                if error:
+                    raise KeyError(key)
                     
-            # Do exception here instead to prevent funny issues
-            if error:
-                raise KeyError(key)
-                
-            return value
+                return value
             
         def __del__(self):
             # Check state on exit/delete too, just in case.
@@ -867,7 +872,7 @@ class Vertibird(object):
             if the virtual machine is already running.
             """
 
-            with GLOBAL_LOCK:
+            with self.vertibird._locks['start_stop']:
                 self.__set_option_offline()
             
                 self.__randomize_ports()
@@ -1515,25 +1520,27 @@ class Vertibird(object):
             Sends the shutdown signal. This is non-blocking.
             """
             
-            self.__check_running()
-            
-            self.__send_monitor_command('system_powerdown')
+            with self.vertibird._locks['start_stop']:
+                self.__check_running()
+                
+                self.__send_monitor_command('system_powerdown')
             
         def signal_reset(self):
             """
             Sends the reset signal. This is non-blocking.
             """
             
-            self.__check_running()
-            
-            self.__send_monitor_command('system_reset')
+            with self.vertibird._locks['start_stop']:
+                self.__check_running()
+                
+                self.__send_monitor_command('system_reset')
             
         def stop(self):
             """
             Terminates the virtual machine.
             """
             
-            with GLOBAL_LOCK:
+            with self.vertibird._locks['start_stop']:
                 self.__check_running()
                 
                 try:
@@ -1592,7 +1599,7 @@ class Vertibird(object):
                         
                         threading.Thread(
                             target = self.__audio_thread,
-                            daemon = False
+                            daemon = True
                         ).start()
                     
                     if self.display.connected == False:
