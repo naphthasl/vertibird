@@ -31,7 +31,7 @@ from datetime import datetime
 from yunyun import Shelve
 
 __author__ = 'Naphtha Nepanthez'
-__version__ = '0.1.3'
+__version__ = '0.1.4'
 __license__ = 'MIT' # SEE LICENSE FILE
 __all__ = [
     'Vertibird',
@@ -1630,7 +1630,8 @@ class Vertibird(object):
             self._preinit = False
             
             self.setDBProperty('audiothrd', False)
-            self.setDBProperty('pid', None)
+            # self.setDBProperty('pid', None)
+            # Maybe comment this out and let state() figure it out?
             
             try:
                 self.display.disconnect()
@@ -1642,8 +1643,6 @@ class Vertibird(object):
                 os.unlink(self.getDBProperty('audiopipe'))
             except (FileNotFoundError, TypeError, OSError):
                 pass # Already removed by something, perhaps a reboot
-            else:
-                self.setDBProperty('audiopipe', None)
             
         def __argescape(self, i: str):
             if any((c in set(',=!?<>~#@:;$*()[]{}&%"\'\\+')) for c in i):
