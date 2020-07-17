@@ -1879,16 +1879,16 @@ if __name__ == '__main__':
             options = y.get_properties()
             options['machine'] = 'pc'
             options['memory'] = 4294967296
-            options['cpu'] = 'host'
+            options['cpu'] = 'EPYC-IBPB'
             options['sockets'] = 1
-            options['cores'] = 4
-            options['threads'] = 1
+            options['cores'] = 6
+            options['threads'] = 2
             options['network'] = 'rtl8139'
             options['sound'] = 'hda'
-            options['vga'] = 'VGA'
+            options['vga'] = 'vmware-svga'
             options['scsi'] = 'lsi53c895a'
             options['floppy'] = None
-            options['inputdev'] = 'ps2'
+            options['inputdev'] = 'usb-mouse'
             y.set_properties(options)
                         
         try:
