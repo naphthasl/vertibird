@@ -1888,7 +1888,7 @@ if __name__ == '__main__':
             options['vga'] = 'VGA'
             options['scsi'] = 'lsi53c895a'
             options['floppy'] = None
-            options['inputdev'] = 'usb-tablet'
+            options['inputdev'] = 'ps2'
             y.set_properties(options)
                         
         try:
