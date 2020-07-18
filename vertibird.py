@@ -1878,7 +1878,7 @@ if __name__ == '__main__':
             
             options = y.get_properties()
             options['machine'] = 'pc'
-            options['memory'] = 4294967296
+            options['memory'] = 12884901888
             options['cpu'] = 'EPYC-IBPB'
             options['sockets'] = 1
             options['cores'] = 6
