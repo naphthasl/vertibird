@@ -1878,12 +1878,12 @@ if __name__ == '__main__':
             
             options = y.get_properties()
             options['machine'] = 'pc'
-            options['memory'] = 12884901888
+            options['memory'] = 8589934592
             options['cpu'] = 'EPYC-IBPB'
             options['sockets'] = 1
             options['cores'] = 6
             options['threads'] = 2
-            options['network'] = 'rtl8139'
+            options['network'] = 'e1000'
             options['sound'] = 'hda'
             options['vga'] = 'vmware-svga'
             options['scsi'] = 'lsi53c895a'
