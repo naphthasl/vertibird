@@ -1863,7 +1863,7 @@ if __name__ == '__main__':
                 y.remove_forwarding(fwd['id'])
             
             y.attach_cdrom(
-                os.path.expanduser('~/iso/win7x86.iso')
+                os.path.expanduser('~/iso/virtio-win-0.1.185.iso')
             )
             
             dsize = 34359738368
@@ -1885,10 +1885,10 @@ if __name__ == '__main__':
             options['threads'] = 2
             options['network'] = 'e1000'
             options['sound'] = 'hda'
-            options['vga'] = 'vmware-svga'
+            options['vga'] = 'qxl-vga'
             options['scsi'] = 'lsi53c895a'
             options['floppy'] = None
-            options['inputdev'] = 'usb-mouse'
+            options['inputdev'] = 'ps2'
             y.set_properties(options)
                         
         try:
