@@ -1877,7 +1877,7 @@ if __name__ == '__main__':
             )
             
             options = y.get_properties()
-            options['machine'] = 'pc'
+            options['machine'] = 'q35'
             options['memory'] = 8589934592
             options['cpu'] = 'EPYC-IBPB'
             options['sockets'] = 1
@@ -1885,7 +1885,7 @@ if __name__ == '__main__':
             options['threads'] = 2
             options['network'] = 'e1000'
             options['sound'] = 'hda'
-            options['vga'] = 'qxl-vga'
+            options['vga'] = 'VGA'
             options['scsi'] = 'lsi53c895a'
             options['floppy'] = None
             options['inputdev'] = 'ps2'
@@ -1899,7 +1899,7 @@ if __name__ == '__main__':
         
         print('Start non-blocking')
 
-        #time.sleep(2)
+        time.sleep(1)
         y.state()
 
         imgGet = (lambda: cv2.cvtColor(np.asarray(
@@ -1926,6 +1926,8 @@ if __name__ == '__main__':
             stream.stop_stream()
             stream.close()
             aud.close()
+            
+            print('Audio server has shut down')
             
         def logplay(y):
             logfile = y.get_log()
