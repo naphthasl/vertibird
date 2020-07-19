@@ -750,6 +750,7 @@ class Vertibird(object):
             """
             
             self._local     = threading.local()
+            self._preinit   = False
             self._cache     = {}
             self.id         = vuuid
             self.vertibird  = vertibird
