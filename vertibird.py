@@ -1880,10 +1880,10 @@ if __name__ == '__main__':
             options = y.get_properties()
             options['machine'] = 'q35'
             options['memory'] = 8589934592
-            options['cpu'] = 'EPYC-IBPB'
-            options['sockets'] = 4
-            options['cores'] = 6
-            options['threads'] = 2
+            options['cpu'] = 'max'
+            options['sockets'] = 1
+            options['cores'] = 4
+            options['threads'] = 1
             options['network'] = 'e1000'
             options['sound'] = 'hda'
             options['vga'] = 'VGA'
