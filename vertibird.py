@@ -1250,7 +1250,7 @@ class Vertibird(object):
                 
             return props
         
-        def set_properties(self, properties: dict):
+        def set_properties(self, properties: dict, check_cores = True):
             """
             Replaces all of the virtual machine options with the contents of a
             property dictionary, of which can be obtained with get_properties()
@@ -1270,7 +1270,7 @@ class Vertibird(object):
             # hell thought assertions ought to be expendable...
             if int(properties['memory']) < 8388608:
                 raise Exceptions.InvalidArgument('Memory allocation too low')
-            elif totcores > os.cpu_count() or totcores < 1:
+            elif (totcores > os.cpu_count() or totcores < 1) and check_cores:
                 raise Exceptions.InvalidArgument('Invalid core count')
             elif not (str(properties['vga']) in QEMUDevices.vga.keys()):
                 raise Exceptions.InvalidArgument('Invalid display adapter')
@@ -1881,7 +1881,7 @@ if __name__ == '__main__':
             options['machine'] = 'q35'
             options['memory'] = 8589934592
             options['cpu'] = 'EPYC-IBPB'
-            options['sockets'] = 1
+            options['sockets'] = 4
             options['cores'] = 6
             options['threads'] = 2
             options['network'] = 'e1000'
@@ -1890,7 +1890,7 @@ if __name__ == '__main__':
             options['scsi'] = 'lsi53c895a'
             options['floppy'] = None
             options['inputdev'] = 'usb-mouse'
-            y.set_properties(options)
+            y.set_properties(options, check_cores = False)
                         
         try:
             # This tests if multi-processing is alright
