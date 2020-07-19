@@ -31,7 +31,7 @@ from datetime import datetime
 from yunyun import Shelve
 
 __author__ = 'Naphtha Nepanthez'
-__version__ = '0.1.4'
+__version__ = '0.1.5'
 __license__ = 'MIT' # SEE LICENSE FILE
 __all__ = [
     'Vertibird',
