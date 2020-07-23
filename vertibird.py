@@ -31,7 +31,7 @@ from datetime import datetime
 from yunyun import Shelve
 
 __author__ = 'Naphtha Nepanthez'
-__version__ = '0.1.6'
+__version__ = '0.1.7'
 __license__ = 'MIT' # SEE LICENSE FILE
 __all__ = [
     'Vertibird',
@@ -612,6 +612,7 @@ class Vertibird(object):
                 self.mouseUp = self.__return_none
                 self.keyDown = self.__return_none
                 self.keyUp = self.__return_none
+                self.keyEvent = self.__return_none
                 
                 self.client = None
             
@@ -697,6 +698,7 @@ class Vertibird(object):
                         self.mouseUp = self.client.mouseUp
                         self.keyDown = self.client.keyDown
                         self.keyUp = self.client.keyUp
+                        self.keyEvent = self.client.keyEvent
                         
                         if capture:
                             self.capture(force = True)
